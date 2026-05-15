@@ -1,0 +1,22 @@
+[formatting]
+align_entries = false
+array_auto_collapse = true
+array_auto_expand = true
+array_trailing_comma = true
+column_width = 100
+indent_string = "  "
+reorder_keys = false
+
+[[rule]]
+include = ["**/Cargo.toml"]
+keys = [
+  "dependencies",
+  "dev-dependencies",
+  "build-dependencies",
+  "lints.rust",
+  "lints.clippy",
+  "lints.rustdoc",
+]
+
+[rule.formatting]
+reorder_keys = true

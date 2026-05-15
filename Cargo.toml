@@ -3,6 +3,23 @@ name = "cowork"
 version = "0.1.0"
 edition = "2024"
 
+[lints.rust]
+missing_docs = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+doc_markdown = "deny"
+missing_errors_doc = "deny"
+missing_panics_doc = "deny"
+must_use_candidate = "deny"
+todo = "deny"
+unimplemented = "deny"
+use_self = "deny"
+wildcard_imports = "deny"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

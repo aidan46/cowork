@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
-# Pre-push hook: slower checks before remote push.
+# Slow push checks.
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+
+if ! command -v taplo >/dev/null 2>&1; then
+  echo "pre-push: need taplo"
+  echo "install: cargo install taplo-cli --locked"
+  exit 1
+fi
+
+echo "pre-push: taplo fmt --check Cargo.toml taplo.toml"
+taplo fmt --check Cargo.toml taplo.toml
 
 echo "pre-push: cargo nextest run"
 rtk cargo nextest run
