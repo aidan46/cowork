@@ -1,0 +1,36 @@
+name: pr-body-lint
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  pr-body-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required headers
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ -z "${PR_BODY:-}" ]; then
+            echo "PR body is empty. Use .github/pull_request_template.md as a starting point."
+            exit 1
+          fi
+          missing=()
+          if ! printf '%s' "$PR_BODY" | grep -q '^## Summary'; then
+            missing+=("## Summary")
+          fi
+          if ! printf '%s' "$PR_BODY" | grep -q '^## How to verify'; then
+            missing+=("## How to verify")
+          fi
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "PR body is missing required section headers:"
+            for h in "${missing[@]}"; do
+              echo "  - $h"
+            done
+            echo ""
+            echo "See .github/pull_request_template.md for expected format."
+            echo "For docs-only or planning-only PRs, write 'N/A: <reason>' under '## How to verify'."
+            exit 1
+          fi
+          echo "PR body has all required headers."

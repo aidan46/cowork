@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Pre-push hook: slower checks before remote push.
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+echo "pre-push: cargo test"
+rtk cargo test
+
+echo "pre-push: cargo doc --no-deps"
+rtk cargo doc --no-deps --quiet

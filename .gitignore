@@ -1,0 +1,6 @@
+/target
+.DS_Store
+.serena/
+prompts/
+HANDOFF.md
+IMPLEMENTATION_PLAN.md
