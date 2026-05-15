@@ -48,7 +48,7 @@
 
 ## Done Check
 - Run `cargo fmt`
-- Run `cargo test`
+- Run `cargo nextest run`
 - Run `cargo clippy -- -D warnings`
 - Run `cargo doc --no-deps --quiet`
 - Update `HANDOFF.md`

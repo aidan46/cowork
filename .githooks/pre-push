@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
-echo "pre-push: cargo test"
-rtk cargo test
+echo "pre-push: cargo nextest run"
+rtk cargo nextest run
 
 echo "pre-push: cargo doc --no-deps"
 rtk cargo doc --no-deps --quiet

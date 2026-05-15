@@ -21,6 +21,8 @@ Suggested branch prefixes:
 
 - Open PR for every session change meant to land.
 - Use `.github/pull_request_template.md`.
+- In `## How to verify`, wrap each test command in backticks so reviewers can copy it directly.
+- Use `cargo nextest run`, not `cargo test`, for Rust test execution in PR verification, hooks, and local checks.
 - Wait for checks with `gh pr checks <PR-number> --watch`.
 - Report to human only after checks pass or a real blocker is clear.
 - Do not self-merge unless human explicitly asks.
@@ -59,7 +61,7 @@ git config core.hooksPath .githooks
 Checks:
 
 - `pre-commit`: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`
-- `pre-push`: `cargo test`, `cargo doc --no-deps --quiet`
+- `pre-push`: `cargo nextest run`, `cargo doc --no-deps --quiet`
 
 Manual run:
 
