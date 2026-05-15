@@ -5,6 +5,10 @@
 - Use caveman skill for code comments too. Keep comments short, direct, low-token.
 - Never push directly to `main`.
 - Always land work through PR.
+- PRs merge by squash only.
+- Merge with `gh pr merge <PR-number> --squash --delete-branch`.
+- Pass explicit squash commit subject and body when merging. Do not accept default combined commit text blindly.
+- PR title must be final commit subject quality.
 - After opening PR, wait for checks with `gh pr checks <PR-number> --watch`.
 - Report to human when PR is good to review, or blocked by concrete failing checks.
 - Keep scope narrow. Prefer small patches over broad rewrites.
@@ -48,7 +52,7 @@
 
 ## Done Check
 - Run `cargo fmt`
-- Run `cargo test`
+- Run `cargo nextest run`
 - Run `cargo clippy -- -D warnings`
 - Run `cargo doc --no-deps --quiet`
 - Update `HANDOFF.md`

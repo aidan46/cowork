@@ -34,3 +34,47 @@ jobs:
             exit 1
           fi
           echo "PR body has all required headers."
+
+      - name: Check how-to-verify formatting
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          verify_section="$(printf '%s\n' "$PR_BODY" | awk '
+            /^## How to verify/ { in_section=1; next }
+            /^## / && in_section { exit }
+            in_section { print }
+          ')"
+
+          trimmed_verify="$(printf '%s\n' "$verify_section" | sed '/^[[:space:]]*$/d')"
+
+          if [ -z "${trimmed_verify:-}" ]; then
+            echo "'## How to verify' is empty."
+            exit 1
+          fi
+
+          if printf '%s\n' "$trimmed_verify" | grep -Eq '^N/A:[[:space:]]+.+$'; then
+            echo "'## How to verify' uses N/A exemption."
+            exit 0
+          fi
+
+          if printf '%s\n' "$trimmed_verify" | grep -Eq '`cargo test`|(^|[[:space:]])cargo test($|[[:space:]])'; then
+            echo "'## How to verify' must use \`cargo nextest run\`, not \`cargo test\`."
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$trimmed_verify" | grep -Eq '^(-|\*)[[:space:]]+`[^`]+`([[:space:]].*)?$|^[0-9]+\.[[:space:]]+`[^`]+`([[:space:]].*)?$'; then
+            echo "'## How to verify' must include at least one copyable command bullet wrapped in backticks."
+            echo "Example: - \`cargo nextest run\`"
+            exit 1
+          fi
+
+          raw_command_lines="$(printf '%s\n' "$trimmed_verify" | grep -En '^(-|\*)[[:space:]]+(cargo|gh|git|rtk|pnpm|npm|yarn|make|just|python|python3|pytest|uv|go|docker|kubectl|bash|sh|\.\/)|^[0-9]+\.[[:space:]]+(cargo|gh|git|rtk|pnpm|npm|yarn|make|just|python|python3|pytest|uv|go|docker|kubectl|bash|sh|\.\/)' || true)"
+
+          if [ -n "${raw_command_lines:-}" ]; then
+            echo "'## How to verify' has command bullets not wrapped in backticks:"
+            printf '%s\n' "$raw_command_lines"
+            echo "Wrap command bullets like: - \`cargo nextest run\`"
+            exit 1
+          fi
+
+          echo "'## How to verify' formatting looks good."
