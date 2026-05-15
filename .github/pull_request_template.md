@@ -1,6 +1,7 @@
 ## Summary
 
 <!-- One short paragraph: what changed and why. -->
+<!-- PR title should already be final squash-commit quality: Conventional Commit subject, short, specific. -->
 
 ## How to verify
 
