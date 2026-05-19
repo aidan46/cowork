@@ -1,3 +1,8 @@
+//! `cowork` CLI library.
+//!
+//! Thin entry layer for CLI parse and exit flow.
+
+/// CLI types.
 pub mod cli;
 
 use std::process::ExitCode;
@@ -28,6 +33,8 @@ struct ErrorBody<'a> {
     message: String,
 }
 
+/// Run `cowork`.
+#[must_use]
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
 

@@ -6,8 +6,10 @@
 - Never push directly to `main`.
 - Always land work through PR.
 - PRs merge by squash only.
-- Merge with `gh pr merge <PR-number> --squash --delete-branch`.
-- Pass explicit squash commit subject and body when merging. Do not accept default combined commit text blindly.
+- Merge with `gh pr merge <PR-number> --squash --delete-branch --subject ... --body-file ...`.
+- Pass explicit squash commit subject and `--body-file` when merging. Do not accept default combined commit text blindly.
+- Wrap squash commit body lines. No long one-line paragraphs.
+- Prefer `scripts/gh-pr-merge-squash` for merge step.
 - PR title must be final commit subject quality.
 - After opening PR, wait for checks with `gh pr checks <PR-number> --watch`.
 - Report to human when PR is good to review, or blocked by concrete failing checks.
@@ -51,9 +53,10 @@
 - Do not keep stale history in `HANDOFF.md`.
 
 ## Done Check
-- Run `cargo fmt`
+- Run `taplo fmt --check Cargo.toml taplo.toml`
+- Run `cargo fmt --all -- --check`
 - Run `cargo nextest run`
-- Run `cargo clippy -- -D warnings`
+- Run `cargo clippy --all-targets -- -D warnings`
 - Run `cargo doc --no-deps --quiet`
 - Update `HANDOFF.md`
 - Update checklist

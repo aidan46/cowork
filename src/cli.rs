@@ -2,47 +2,61 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueHint};
 
+/// Parsed `cowork` args.
 #[derive(Debug, Parser)]
 #[command(name = "cowork")]
 #[command(about = "Local AI coworker CLI for coding agents", long_about = None)]
 #[command(subcommand_required = true, arg_required_else_help = true)]
 pub struct Cli {
+    /// Subcommand to run.
     #[command(subcommand)]
     pub command: Command,
 }
 
+/// `cowork` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Ask about file context.
     #[command(arg_required_else_help = true)]
     Ask(AskArgs),
 }
 
+/// Args for `cowork ask`.
 #[derive(Debug, Args)]
 pub struct AskArgs {
+    /// Files or dirs to inspect.
     #[arg(long, required = true, num_args = 1.., value_name = "PATHS", value_hint = ValueHint::AnyPath)]
     pub paths: Vec<PathBuf>,
 
+    /// Narrow question to answer.
     #[arg(long, required = true, value_name = "QUESTION")]
     pub question: String,
 
+    /// Model override.
     #[arg(long, value_name = "MODEL")]
     pub model: Option<String>,
 
+    /// Host override.
     #[arg(long, value_name = "HOST")]
     pub host: Option<String>,
 
+    /// Max input bytes.
     #[arg(long, value_name = "BYTES")]
     pub max_bytes: Option<usize>,
 
+    /// Recurse into dirs.
     #[arg(long)]
     pub recursive: bool,
 
+    /// Include glob.
     #[arg(long, value_name = "GLOB")]
     pub include: Vec<String>,
 
+    /// Exclude glob.
     #[arg(long, value_name = "GLOB")]
     pub exclude: Vec<String>,
 
+    /// Fail on missing path.
     #[arg(long)]
     pub fail_on_missing: bool,
 }

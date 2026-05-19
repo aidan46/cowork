@@ -29,6 +29,12 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
+      - name: Install taplo
+        run: cargo install taplo-cli --locked
+
+      - name: taplo
+        run: taplo fmt --check Cargo.toml taplo.toml
+
       - name: fmt check
         run: cargo fmt --all -- --check
 

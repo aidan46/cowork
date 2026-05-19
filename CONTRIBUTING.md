@@ -21,8 +21,10 @@ Suggested branch prefixes:
 
 - Open PR for every session change meant to land.
 - PRs merge by squash only.
-- Merge with `gh pr merge <PR-number> --squash --delete-branch`.
-- Pass explicit squash commit subject and body when merging. Do not blindly use default combined commit text.
+- Merge with `gh pr merge <PR-number> --squash --delete-branch --subject ... --body-file ...`.
+- Pass explicit squash commit subject and `--body-file` when merging. Do not blindly use default combined commit text.
+- Wrap squash commit body lines to 72 cols max. No long one-line paragraphs.
+- Prefer `scripts/gh-pr-merge-squash` for merge step.
 - Use `.github/pull_request_template.md`.
 - PR title must be a good Conventional Commit subject, because squash merge uses it as the commit message.
 - In `## How to verify`, wrap each test command in backticks so reviewers can copy it directly.
@@ -66,8 +68,8 @@ git config core.hooksPath .githooks
 
 Checks:
 
-- `pre-commit`: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`
-- `pre-push`: `cargo nextest run`, `cargo doc --no-deps --quiet`
+- `pre-commit`: `taplo fmt --check Cargo.toml taplo.toml`, `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`
+- `pre-push`: `taplo fmt --check Cargo.toml taplo.toml`, `cargo nextest run`, `cargo doc --no-deps --quiet`
 
 Manual run:
 
@@ -81,5 +83,5 @@ bash .githooks/pre-push
 Preferred merge command:
 
 ```bash
-gh pr merge <PR-number> --squash --delete-branch --subject "<type>(<scope>): <subject>" --body "<why this landed>"
+scripts/gh-pr-merge-squash <PR-number> "<type>(<scope>): <subject>" path/to/merge-body.txt
 ```

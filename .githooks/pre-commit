@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
-# Pre-commit hook: fast mechanical checks.
+# Fast mech checks.
 # Install once: git config core.hooksPath .githooks
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+
+if ! command -v taplo >/dev/null 2>&1; then
+  echo "pre-commit: need taplo"
+  echo "install: cargo install taplo-cli --locked"
+  exit 1
+fi
+
+echo "pre-commit: taplo fmt --check Cargo.toml taplo.toml"
+taplo fmt --check Cargo.toml taplo.toml
 
 echo "pre-commit: cargo fmt --all -- --check"
 rtk cargo fmt --all -- --check

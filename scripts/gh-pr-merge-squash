@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Enforce wrapped squash body file.
+set -euo pipefail
+
+if [[ $# -ne 3 ]]; then
+  echo "usage: $0 <pr-number> <subject> <body-file>" >&2
+  exit 1
+fi
+
+pr_number="$1"
+subject="$2"
+body_file="$3"
+
+if [[ ! -r "$body_file" ]]; then
+  echo "body file not readable: $body_file" >&2
+  exit 1
+fi
+
+if ! grep -q '[^[:space:]]' "$body_file"; then
+  echo "body file empty: $body_file" >&2
+  exit 1
+fi
+
+line_too_long="$(
+  awk 'length > 72 { print NR; exit 0 }' "$body_file"
+)"
+
+if [[ -n "$line_too_long" ]]; then
+  echo "body file line too long: line $line_too_long" >&2
+  echo "wrap commit body to 72 cols max" >&2
+  exit 1
+fi
+
+gh pr merge "$pr_number" \
+  --squash \
+  --delete-branch \
+  --subject "$subject" \
+  --body-file "$body_file"
