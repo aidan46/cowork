@@ -27,7 +27,10 @@ Suggested branch prefixes:
 - Prefer `scripts/gh-pr-merge-squash` for merge step.
 - Use `.github/pull_request_template.md`.
 - PR title must be a good Conventional Commit subject, because squash merge uses it as the commit message.
+- In `## Summary`, state what changed, where it changed, and visible behavior impact.
 - In `## How to verify`, wrap each test command in backticks so reviewers can copy it directly.
+- In `## How to verify`, include expected result after each relevant command, especially for CLI output or exit-code changes.
+- For behavior checks, call out exact JSON codes, key messages, or stub path reached when that is the point of the PR.
 - Use `cargo nextest run`, not `cargo test`, for Rust test execution in PR verification, hooks, and local checks.
 - Wait for checks with `gh pr checks <PR-number> --watch`.
 - Report to human only after checks pass or a real blocker is clear.
