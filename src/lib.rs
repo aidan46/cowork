@@ -4,60 +4,42 @@
 
 /// CLI types.
 pub mod cli;
+mod error;
 
 use std::process::ExitCode;
 
-use clap::Parser;
-use serde::Serialize;
-use thiserror::Error;
+use clap::{Parser, error::ErrorKind};
 
 pub use cli::{AskArgs, Cli, Command};
-
-#[derive(Debug, Error)]
-enum AppError {
-    #[error("`cowork ask` not implemented yet")]
-    AskNotImplemented,
-}
-
-#[derive(Debug, Serialize)]
-struct ErrorResponse<'a> {
-    schema_version: &'a str,
-    command: &'a str,
-    status: &'a str,
-    error: ErrorBody<'a>,
-}
-
-#[derive(Debug, Serialize)]
-struct ErrorBody<'a> {
-    code: &'a str,
-    message: String,
-}
+use error::AppError;
 
 /// Run `cowork`.
 #[must_use]
 pub fn run() -> ExitCode {
-    let cli = Cli::parse();
+    match try_run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            println!("{}", error.to_json());
+            error.exit_code()
+        }
+    }
+}
+
+fn try_run() -> Result<(), AppError> {
+    let cli = parse_cli()?;
 
     match cli.command {
         Command::Ask(args) => run_ask(args),
     }
 }
 
-fn run_ask(_args: AskArgs) -> ExitCode {
-    let response = ErrorResponse {
-        schema_version: "1.0",
-        command: "ask",
-        status: "error",
-        error: ErrorBody {
-            code: "NOT_IMPLEMENTED",
-            message: AppError::AskNotImplemented.to_string(),
-        },
-    };
+fn parse_cli() -> Result<Cli, AppError> {
+    Cli::try_parse().map_err(|error| match error.kind() {
+        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => error.exit(),
+        _ => AppError::invalid_arguments(error.to_string()),
+    })
+}
 
-    println!(
-        "{}",
-        serde_json::to_string(&response).expect("error response should serialize")
-    );
-
-    ExitCode::from(1)
+fn run_ask(_args: AskArgs) -> Result<(), AppError> {
+    Err(AppError::AskNotImplemented)
 }
