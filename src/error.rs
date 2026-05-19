@@ -22,8 +22,6 @@ pub enum AppError {
     ModelRequestFailed { message: String },
     #[error("{message}")]
     ResponseParseFailed { message: String },
-    #[error("`cowork ask` not implemented yet")]
-    AskNotImplemented,
 }
 
 impl AppError {
@@ -81,7 +79,7 @@ impl AppError {
     #[must_use]
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            Self::InvalidArguments { .. } | Self::AskNotImplemented => ExitCode::from(1),
+            Self::InvalidArguments { .. } => ExitCode::from(1),
             Self::MissingPath { .. }
             | Self::DirectoryRequiresRecursive { .. }
             | Self::FileRead { .. } => ExitCode::from(2),
@@ -106,7 +104,6 @@ impl AppError {
             Self::MaxBytesExceeded { .. } => "MAX_BYTES_EXCEEDED",
             Self::ModelRequestFailed { .. } => "MODEL_REQUEST_FAILED",
             Self::ResponseParseFailed { .. } => "RESPONSE_PARSE_FAILED",
-            Self::AskNotImplemented => "ASK_NOT_IMPLEMENTED",
         }
     }
 
@@ -126,8 +123,7 @@ impl AppError {
             Self::FileRead { .. } => Some("Check file exists and is readable."),
             Self::MaxBytesExceeded { .. } => Some("Pass larger `--max-bytes` or fewer files."),
             Self::ModelRequestFailed { .. } => Some("Check Ollama server, model, and `--host`."),
-            Self::ResponseParseFailed { .. } => Some("Check Ollama response envelope."),
-            Self::AskNotImplemented => None,
+            Self::ResponseParseFailed { .. } => Some("Check Ollama response and ask JSON schema."),
         }
     }
 }
@@ -176,26 +172,6 @@ mod tests {
         assert_eq!(
             AppError::invalid_arguments("bad flag").exit_code(),
             ExitCode::from(1)
-        );
-    }
-
-    #[test]
-    fn ask_not_implemented_serializes_as_json_error() {
-        let value =
-            serde_json::from_str::<serde_json::Value>(&AppError::AskNotImplemented.to_json())
-                .expect("error json should parse");
-
-        assert_eq!(
-            value,
-            json!({
-                "schema_version": "1.0",
-                "command": "ask",
-                "status": "error",
-                "error": {
-                    "code": "ASK_NOT_IMPLEMENTED",
-                    "message": "`cowork ask` not implemented yet"
-                }
-            })
         );
     }
 
