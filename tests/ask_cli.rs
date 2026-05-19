@@ -1,0 +1,261 @@
+//! Black-box CLI tests for `cowork ask`.
+
+use std::{
+    fs,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    path::{Path, PathBuf},
+    process::Command,
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use assert_cmd::cargo::CommandCargoExt;
+use serde_json::{Value, json};
+
+#[test]
+fn missing_model_without_config_returns_invalid_arguments() {
+    let dirs = test_dirs("missing-model");
+    let file = write_temp_file(&dirs.project, "input.rs", "fn main() {}\n");
+
+    let output = run_ask(
+        &dirs.project,
+        &dirs.home,
+        &[arg_path(&file), arg_question("explain")],
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "INVALID_ARGUMENTS");
+}
+
+#[test]
+fn config_backed_success_returns_ok_json() {
+    let dirs = test_dirs("config-success");
+    let file = write_temp_file(&dirs.project, "input.rs", "fn answer() -> u8 { 42 }\n");
+    let (host, handle) = spawn_server(ok_response(&response_envelope(&valid_model_json())));
+
+    write_config(
+        &dirs.project.join("cowork.toml"),
+        &format!("[ask]\nmodel = \"gemma3:12b\"\nhost = \"{host}\"\n"),
+    );
+
+    let output = run_ask(
+        &dirs.project,
+        &dirs.home,
+        &[arg_path(&file), arg_question("explain")],
+    );
+
+    handle.join().expect("server should join");
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["status"], "ok");
+    assert_eq!(json["command"], "ask");
+}
+
+#[test]
+fn bad_model_json_returns_response_parse_failed() {
+    let dirs = test_dirs("bad-model-json");
+    let file = write_temp_file(&dirs.project, "input.rs", "fn bad() {}\n");
+    let (host, handle) = spawn_server(ok_response(&response_envelope("not json")));
+
+    let output = run_ask(
+        &dirs.project,
+        &dirs.home,
+        &[
+            arg_path(&file),
+            arg_question("explain"),
+            "--model".to_string(),
+            "gemma3:12b".to_string(),
+            "--host".to_string(),
+            host,
+        ],
+    );
+
+    handle.join().expect("server should join");
+    assert_eq!(output.status.code(), Some(5));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "RESPONSE_PARSE_FAILED");
+}
+
+fn run_ask(project_dir: &Path, home_dir: &Path, args: &[String]) -> std::process::Output {
+    Command::cargo_bin("cowork")
+        .expect("binary should build")
+        .current_dir(project_dir)
+        .env("HOME", home_dir)
+        .args(["ask"])
+        .args(args)
+        .output()
+        .expect("command should run")
+}
+
+fn parse_stdout(stdout: &[u8]) -> Value {
+    serde_json::from_slice(stdout).expect("stdout should be valid json")
+}
+
+fn arg_path(path: &Path) -> String {
+    format!("--paths={}", path.to_string_lossy())
+}
+
+fn arg_question(question: &str) -> String {
+    format!("--question={question}")
+}
+
+fn write_temp_file(project_dir: &Path, name: &str, content: &str) -> PathBuf {
+    let path = project_dir.join(name);
+    fs::write(&path, content).expect("file should write");
+    path
+}
+
+struct TestDirs {
+    project: PathBuf,
+    home: PathBuf,
+}
+
+fn test_dirs(label: &str) -> TestDirs {
+    let root = std::env::temp_dir().join(format!(
+        "cowork-cli-test-{label}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should move forward")
+            .as_nanos()
+    ));
+    let project = root.join("project");
+    let home = root.join("home");
+
+    fs::create_dir_all(&project).expect("project dir should create");
+    fs::create_dir_all(home.join(".cowork")).expect("home config dir should create");
+
+    TestDirs { project, home }
+}
+
+fn write_config(path: &Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("config parent should create");
+    }
+    fs::write(path, content).expect("config should write");
+}
+
+fn spawn_server(response: String) -> (String, thread::JoinHandle<Vec<u8>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have addr");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("server should accept");
+        let request = read_request(&mut stream);
+
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should write");
+        stream.flush().expect("response should flush");
+
+        request
+    });
+
+    (format!("http://{address}"), handle)
+}
+
+fn read_request(stream: &mut TcpStream) -> Vec<u8> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("timeout should set");
+
+    let mut request = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    let mut body_start = None;
+    let mut body_len = 0_usize;
+
+    loop {
+        let read = stream.read(&mut buffer).expect("request should read");
+        if read == 0 {
+            break;
+        }
+
+        request.extend_from_slice(&buffer[..read]);
+
+        if body_start.is_none()
+            && let Some(index) = find_bytes(&request, b"\r\n\r\n")
+        {
+            body_start = Some(index + 4);
+            body_len = parse_content_length(&request[..index + 4]);
+        }
+
+        if let Some(body_start) = body_start
+            && request.len() >= body_start + body_len
+        {
+            break;
+        }
+    }
+
+    request
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn parse_content_length(headers: &[u8]) -> usize {
+    let headers = String::from_utf8(headers.to_vec()).expect("headers should be utf-8");
+
+    headers
+        .lines()
+        .find_map(|line| {
+            let value = line.strip_prefix("content-length: ")?;
+            value.parse::<usize>().ok()
+        })
+        .unwrap_or(0)
+}
+
+fn ok_response(body: &str) -> String {
+    http_response(200, "OK", body)
+}
+
+fn http_response(status: u16, status_text: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status} {status_text}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn response_envelope(response: &str) -> String {
+    json!({ "response": response }).to_string()
+}
+
+fn valid_model_json() -> String {
+    json!({
+        "question": "explain",
+        "answer": {
+            "summary": "It defines a function.",
+            "confidence": "high",
+            "not_found": false
+        },
+        "files": [
+            {
+                "path": "input.rs",
+                "included": true,
+                "reason": "Input file.",
+                "bytes": 13
+            }
+        ],
+        "symbols": [],
+        "evidence": [],
+        "risks": [],
+        "next_reads": [],
+        "metadata": {
+            "input_bytes": 13,
+            "duration_ms": 4
+        }
+    })
+    .to_string()
+}
