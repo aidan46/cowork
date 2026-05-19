@@ -1,0 +1,183 @@
+use std::{fs, path::Path};
+
+use serde::Deserialize;
+
+use crate::error::AppError;
+
+/// Default Ollama host for `ask`.
+pub const DEFAULT_HOST: &str = "http://localhost:11434";
+
+/// Resolved config for `ask`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ResolvedAskConfig {
+    /// Model name after config merge.
+    pub model: Option<String>,
+    /// Host after config merge.
+    pub host: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FileConfig {
+    #[serde(default)]
+    ask: AskConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AskConfig {
+    model: Option<String>,
+    host: Option<String>,
+}
+
+/// Resolve `ask` config from user config, project config, then CLI.
+pub fn resolve_ask_config(
+    project_dir: &Path,
+    home_dir: Option<&Path>,
+    cli_model: Option<String>,
+    cli_host: Option<String>,
+) -> Result<ResolvedAskConfig, AppError> {
+    let user_config = home_dir
+        .map(|home| load_optional_ask_config(&home.join(".cowork/config.toml")))
+        .transpose()?
+        .unwrap_or_default();
+    let project_config = load_optional_ask_config(&project_dir.join("cowork.toml"))?;
+
+    Ok(ResolvedAskConfig {
+        model: cli_model.or(project_config.model).or(user_config.model),
+        host: cli_host
+            .or(project_config.host)
+            .or(user_config.host)
+            .unwrap_or_else(|| DEFAULT_HOST.to_string()),
+    })
+}
+
+fn load_optional_ask_config(path: &Path) -> Result<AskConfig, AppError> {
+    if !path.exists() {
+        return Ok(AskConfig::default());
+    }
+
+    let config = fs::read_to_string(path).map_err(|error| {
+        AppError::invalid_arguments(format!(
+            "failed to read config file {}: {error}",
+            path.display()
+        ))
+    })?;
+    let parsed = toml::from_str::<FileConfig>(&config).map_err(|error| {
+        AppError::invalid_arguments(format!(
+            "failed to parse config file {}: {error}",
+            path.display()
+        ))
+    })?;
+
+    Ok(parsed.ask)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{DEFAULT_HOST, resolve_ask_config};
+
+    #[test]
+    fn missing_config_files_are_noop() {
+        let dirs = test_dirs();
+
+        let config = resolve_ask_config(&dirs.project, Some(&dirs.home), None, None)
+            .expect("missing config should be ok");
+
+        assert_eq!(config.model, None);
+        assert_eq!(config.host, DEFAULT_HOST);
+    }
+
+    #[test]
+    fn project_config_beats_user_config() {
+        let dirs = test_dirs();
+        write_config(
+            &dirs.home.join(".cowork/config.toml"),
+            "[ask]\nmodel = \"user-model\"\nhost = \"http://user-host\"\n",
+        );
+        write_config(
+            &dirs.project.join("cowork.toml"),
+            "[ask]\nmodel = \"project-model\"\nhost = \"http://project-host\"\n",
+        );
+
+        let config = resolve_ask_config(&dirs.project, Some(&dirs.home), None, None)
+            .expect("config should load");
+
+        assert_eq!(config.model.as_deref(), Some("project-model"));
+        assert_eq!(config.host, "http://project-host");
+    }
+
+    #[test]
+    fn missing_home_skips_user_config() {
+        let dirs = test_dirs();
+        write_config(
+            &dirs.home.join(".cowork/config.toml"),
+            "[ask]\nmodel = \"user-model\"\nhost = \"http://user-host\"\n",
+        );
+
+        let config =
+            resolve_ask_config(&dirs.project, None, None, None).expect("config should load");
+
+        assert_eq!(config.model, None);
+        assert_eq!(config.host, DEFAULT_HOST);
+    }
+
+    #[test]
+    fn cli_flags_beat_config() {
+        let dirs = test_dirs();
+        write_config(
+            &dirs.home.join(".cowork/config.toml"),
+            "[ask]\nmodel = \"user-model\"\nhost = \"http://user-host\"\n",
+        );
+        write_config(
+            &dirs.project.join("cowork.toml"),
+            "[ask]\nmodel = \"project-model\"\nhost = \"http://project-host\"\n",
+        );
+
+        let config = resolve_ask_config(
+            &dirs.project,
+            Some(&dirs.home),
+            Some("cli-model".to_string()),
+            Some("http://cli-host".to_string()),
+        )
+        .expect("config should load");
+
+        assert_eq!(config.model.as_deref(), Some("cli-model"));
+        assert_eq!(config.host, "http://cli-host");
+    }
+
+    struct TestDirs {
+        project: PathBuf,
+        home: PathBuf,
+    }
+
+    fn test_dirs() -> TestDirs {
+        let root = std::env::temp_dir().join(format!(
+            "cowork-config-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let project = root.join("project");
+        let home = root.join("home");
+
+        fs::create_dir_all(&project).expect("project dir should create");
+        fs::create_dir_all(&home).expect("home dir should create");
+
+        TestDirs { project, home }
+    }
+
+    fn write_config(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent dir should create");
+        }
+
+        fs::write(path, contents).expect("config should write");
+    }
+}
