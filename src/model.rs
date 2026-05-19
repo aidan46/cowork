@@ -1,11 +1,12 @@
-use std::time::Duration;
+use std::{error::Error as _, time::Duration};
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Send one Ollama generate req, return raw model text.
 pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<String, AppError> {
@@ -29,10 +30,14 @@ pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<
     }
 
     let client = Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|error| {
-            AppError::model_request_failed(format!("failed to build model client: {error}"))
+            AppError::model_request_failed(format_reqwest_error(
+                "failed to build model client",
+                &error,
+            ))
         })?;
 
     let response = client
@@ -46,7 +51,10 @@ pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<
         })
         .send()
         .map_err(|error| {
-            AppError::model_request_failed(format!("failed to send model request: {error}"))
+            AppError::model_request_failed(format_reqwest_error(
+                "failed to send model request",
+                &error,
+            ))
         })?;
 
     if !response.status().is_success() {
@@ -64,6 +72,19 @@ pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<
         })
 }
 
+fn format_reqwest_error(prefix: &str, error: &reqwest::Error) -> String {
+    let mut message = format!("{prefix}: {error}");
+    let mut source = error.source();
+
+    while let Some(next) = source {
+        message.push_str(": ");
+        message.push_str(&next.to_string());
+        source = next.source();
+    }
+
+    message
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -79,7 +100,7 @@ mod tests {
     use crate::error::AppError;
 
     #[test]
-    fn request_body_keeps_stream_format_and_temperature() {
+    fn request_body_keeps_format_and_temperature() {
         let (host, handle) = spawn_server(ok_response(&response_envelope(r#"{"answer":"ok"}"#)));
 
         let result =
