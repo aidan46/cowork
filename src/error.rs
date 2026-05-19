@@ -18,6 +18,10 @@ pub enum AppError {
         max_bytes: usize,
         actual_bytes: usize,
     },
+    #[error("{message}")]
+    ModelRequestFailed { message: String },
+    #[error("{message}")]
+    ResponseParseFailed { message: String },
     #[error("`cowork ask` not implemented yet")]
     AskNotImplemented,
 }
@@ -61,6 +65,20 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn model_request_failed(message: impl Into<String>) -> Self {
+        Self::ModelRequestFailed {
+            message: message.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn response_parse_failed(message: impl Into<String>) -> Self {
+        Self::ResponseParseFailed {
+            message: message.into(),
+        }
+    }
+
+    #[must_use]
     pub fn exit_code(&self) -> ExitCode {
         match self {
             Self::InvalidArguments { .. } | Self::AskNotImplemented => ExitCode::from(1),
@@ -68,6 +86,8 @@ impl AppError {
             | Self::DirectoryRequiresRecursive { .. }
             | Self::FileRead { .. } => ExitCode::from(2),
             Self::MaxBytesExceeded { .. } => ExitCode::from(3),
+            Self::ModelRequestFailed { .. } => ExitCode::from(4),
+            Self::ResponseParseFailed { .. } => ExitCode::from(5),
         }
     }
 
@@ -84,6 +104,8 @@ impl AppError {
             Self::DirectoryRequiresRecursive { .. } => "DIRECTORY_REQUIRES_RECURSIVE",
             Self::FileRead { .. } => "FILE_READ_FAILED",
             Self::MaxBytesExceeded { .. } => "MAX_BYTES_EXCEEDED",
+            Self::ModelRequestFailed { .. } => "MODEL_REQUEST_FAILED",
+            Self::ResponseParseFailed { .. } => "RESPONSE_PARSE_FAILED",
             Self::AskNotImplemented => "ASK_NOT_IMPLEMENTED",
         }
     }
@@ -103,6 +125,8 @@ impl AppError {
             }
             Self::FileRead { .. } => Some("Check file exists and is readable."),
             Self::MaxBytesExceeded { .. } => Some("Pass larger `--max-bytes` or fewer files."),
+            Self::ModelRequestFailed { .. } => Some("Check Ollama server, model, and `--host`."),
+            Self::ResponseParseFailed { .. } => Some("Check Ollama response envelope."),
             Self::AskNotImplemented => None,
         }
     }
@@ -232,6 +256,22 @@ mod tests {
                     "hint": "Pass larger `--max-bytes` or fewer files."
                 }
             })
+        );
+    }
+
+    #[test]
+    fn model_request_failed_maps_to_exit_code_four() {
+        assert_eq!(
+            AppError::model_request_failed("down").exit_code(),
+            ExitCode::from(4)
+        );
+    }
+
+    #[test]
+    fn response_parse_failed_maps_to_exit_code_five() {
+        assert_eq!(
+            AppError::response_parse_failed("bad json").exit_code(),
+            ExitCode::from(5)
         );
     }
 }
