@@ -4,22 +4,22 @@
 
 /// CLI types.
 pub mod cli;
+mod config;
 mod error;
 mod files;
 mod model;
 mod output;
 mod prompt;
 
-use std::process::ExitCode;
+use std::{env, path::Path, process::ExitCode};
 
 use clap::{Parser, error::ErrorKind};
 
 pub use cli::{AskArgs, Cli, Command};
+use config::resolve_ask_config;
 use error::AppError;
 use files::{collect_ask_candidates, load_ask_files};
 use prompt::render_ask_prompt;
-
-const DEFAULT_HOST: &str = "http://localhost:11434";
 
 /// Run `cowork`.
 #[must_use]
@@ -56,15 +56,38 @@ fn run_ask(args: AskArgs) -> Result<(), AppError> {
 }
 
 fn run_ask_json(args: AskArgs) -> Result<String, AppError> {
-    let candidate_paths =
-        collect_ask_candidates(&args.paths, args.recursive, &args.include, &args.exclude)?;
-    let loaded_files = load_ask_files(&candidate_paths, args.max_bytes)?;
-    let prompt = render_ask_prompt(&args.question, &loaded_files);
-    let model = args.model.as_deref().ok_or_else(|| {
+    let project_dir = env::current_dir().map_err(|error| {
+        AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
+    })?;
+    let home_dir = env::var_os("HOME").map(std::path::PathBuf::from);
+
+    run_ask_json_in(args, &project_dir, home_dir.as_deref())
+}
+
+fn run_ask_json_in(
+    args: AskArgs,
+    project_dir: &Path,
+    home_dir: Option<&Path>,
+) -> Result<String, AppError> {
+    let AskArgs {
+        paths,
+        question,
+        model,
+        host,
+        max_bytes,
+        recursive,
+        include,
+        exclude,
+        fail_on_missing: _,
+    } = args;
+    let candidate_paths = collect_ask_candidates(&paths, recursive, &include, &exclude)?;
+    let loaded_files = load_ask_files(&candidate_paths, max_bytes)?;
+    let prompt = render_ask_prompt(&question, &loaded_files);
+    let config = resolve_ask_config(project_dir, home_dir, model, host)?;
+    let model = config.model.as_deref().ok_or_else(|| {
         AppError::invalid_arguments("`--model` required, no default model configured yet")
     })?;
-    let host = args.host.as_deref().unwrap_or(DEFAULT_HOST);
-    let raw_output = model::request_generate(host, model, &prompt)?;
+    let raw_output = model::request_generate(&config.host, model, &prompt)?;
     let output = output::parse_ask_output(&raw_output)?;
 
     Ok(output.to_json())
@@ -76,33 +99,37 @@ mod tests {
         fs,
         io::{Read, Write},
         net::{TcpListener, TcpStream},
-        path::PathBuf,
+        path::{Path, PathBuf},
         thread,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use serde_json::json;
 
-    use super::{AskArgs, run_ask_json};
+    use super::{AskArgs, run_ask_json_in};
     use crate::error::AppError;
 
     #[test]
     fn missing_model_maps_to_invalid_arguments() {
+        let dirs = test_dirs();
         let file = write_temp_file("fn main() {}\n");
         let args = ask_args(vec![file], None, None);
 
-        let error = run_ask_json(args).expect_err("missing model should fail");
+        let error = run_ask_json_in(args, &dirs.project, Some(&dirs.home))
+            .expect_err("missing model should fail");
 
         assert!(matches!(error, AppError::InvalidArguments { .. }));
     }
 
     #[test]
     fn explicit_host_override_reaches_model_client_path() {
+        let dirs = test_dirs();
         let file = write_temp_file("fn main() {}\n");
         let (host, handle) = spawn_server(ok_response(&response_envelope(&valid_model_json())));
         let args = ask_args(vec![file], Some("gemma3:12b"), Some(host));
 
-        let output = run_ask_json(args).expect("ask should pass");
+        let output =
+            run_ask_json_in(args, &dirs.project, Some(&dirs.home)).expect("ask should pass");
         let request = handle.join().expect("server should join");
         let request_text = String::from_utf8(request).expect("request should be utf-8");
         let value =
@@ -114,11 +141,13 @@ mod tests {
 
     #[test]
     fn happy_path_returns_success_json() {
+        let dirs = test_dirs();
         let file = write_temp_file("fn main() {}\n");
         let (host, handle) = spawn_server(ok_response(&response_envelope(&valid_model_json())));
         let args = ask_args(vec![file], Some("gemma3:12b"), Some(host));
 
-        let output = run_ask_json(args).expect("ask should pass");
+        let output =
+            run_ask_json_in(args, &dirs.project, Some(&dirs.home)).expect("ask should pass");
         let value =
             serde_json::from_str::<serde_json::Value>(&output).expect("output should be json");
 
@@ -128,14 +157,36 @@ mod tests {
 
     #[test]
     fn bad_model_json_maps_to_response_parse_failed() {
+        let dirs = test_dirs();
         let file = write_temp_file("fn main() {}\n");
         let (host, handle) = spawn_server(ok_response(&response_envelope("not json")));
         let args = ask_args(vec![file], Some("gemma3:12b"), Some(host));
 
-        let error = run_ask_json(args).expect_err("bad model json should fail");
+        let error = run_ask_json_in(args, &dirs.project, Some(&dirs.home))
+            .expect_err("bad model json should fail");
 
         handle.join().expect("server should join");
         assert!(matches!(error, AppError::ResponseParseFailed { .. }));
+    }
+
+    #[test]
+    fn config_backed_model_removes_missing_model_error_path() {
+        let dirs = test_dirs();
+        let file = write_temp_file("fn main() {}\n");
+        let (host, handle) = spawn_server(ok_response(&response_envelope(&valid_model_json())));
+        write_config(
+            &dirs.project.join("cowork.toml"),
+            &format!("[ask]\nmodel = \"gemma3:12b\"\nhost = \"{host}\"\n"),
+        );
+        let args = ask_args(vec![file], None, None);
+
+        let output = run_ask_json_in(args, &dirs.project, Some(&dirs.home))
+            .expect("config-backed model should pass");
+        let value =
+            serde_json::from_str::<serde_json::Value>(&output).expect("output should be json");
+
+        handle.join().expect("server should join");
+        assert_eq!(value["status"], "ok");
     }
 
     fn ask_args(paths: Vec<PathBuf>, model: Option<&str>, host: Option<String>) -> AskArgs {
@@ -164,6 +215,37 @@ mod tests {
 
         fs::write(&path, content).expect("temp file should write");
         path
+    }
+
+    struct TestDirs {
+        project: PathBuf,
+        home: PathBuf,
+    }
+
+    fn test_dirs() -> TestDirs {
+        let root = std::env::temp_dir().join(format!(
+            "cowork-ask-config-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let project = root.join("project");
+        let home = root.join("home");
+
+        fs::create_dir_all(&project).expect("project dir should create");
+        fs::create_dir_all(&home).expect("home dir should create");
+
+        TestDirs { project, home }
+    }
+
+    fn write_config(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent dir should create");
+        }
+
+        fs::write(path, contents).expect("config should write");
     }
 
     fn spawn_server(response: String) -> (String, thread::JoinHandle<Vec<u8>>) {
