@@ -7,6 +7,7 @@ pub mod cli;
 mod error;
 mod files;
 mod model;
+mod output;
 mod prompt;
 
 use std::process::ExitCode;
@@ -51,6 +52,8 @@ fn run_ask(args: AskArgs) -> Result<(), AppError> {
     let loaded_files = load_ask_files(&candidate_paths, args.max_bytes)?;
     let _prompt = render_ask_prompt(&args.question, &loaded_files);
     let _ = model::request_generate;
+    let _ = output::parse_ask_output;
+    let _ = output::AskOutput::to_json;
 
     Err(AppError::AskNotImplemented)
 }
