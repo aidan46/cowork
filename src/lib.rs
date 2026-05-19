@@ -5,6 +5,7 @@
 /// CLI types.
 pub mod cli;
 mod error;
+mod files;
 
 use std::process::ExitCode;
 
@@ -12,6 +13,7 @@ use clap::{Parser, error::ErrorKind};
 
 pub use cli::{AskArgs, Cli, Command};
 use error::AppError;
+use files::validate_ask_paths;
 
 /// Run `cowork`.
 #[must_use]
@@ -40,6 +42,8 @@ fn parse_cli() -> Result<Cli, AppError> {
     })
 }
 
-fn run_ask(_args: AskArgs) -> Result<(), AppError> {
+fn run_ask(args: AskArgs) -> Result<(), AppError> {
+    validate_ask_paths(&args.paths, args.recursive)?;
+
     Err(AppError::AskNotImplemented)
 }
