@@ -13,7 +13,7 @@ use clap::{Parser, error::ErrorKind};
 
 pub use cli::{AskArgs, Cli, Command};
 use error::AppError;
-use files::validate_ask_paths;
+use files::collect_ask_candidates;
 
 /// Run `cowork`.
 #[must_use]
@@ -43,7 +43,8 @@ fn parse_cli() -> Result<Cli, AppError> {
 }
 
 fn run_ask(args: AskArgs) -> Result<(), AppError> {
-    validate_ask_paths(&args.paths, args.recursive)?;
+    let _candidate_paths =
+        collect_ask_candidates(&args.paths, args.recursive, &args.include, &args.exclude)?;
 
     Err(AppError::AskNotImplemented)
 }
