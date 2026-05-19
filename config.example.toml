@@ -1,0 +1,3 @@
+[ask]
+model = "your-model"
+host = "http://localhost:11434"
