@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use walkdir::{DirEntry, WalkDir};
@@ -43,6 +46,44 @@ pub fn collect_ask_candidates(
     candidates.dedup();
 
     Ok(candidates)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct LoadedAskFile {
+    pub(crate) path: PathBuf,
+    pub(crate) content: String,
+    pub(crate) bytes: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct LoadedAskFiles {
+    pub(crate) files: Vec<LoadedAskFile>,
+    pub(crate) total_bytes: usize,
+}
+
+pub(crate) fn load_ask_files(
+    paths: &[PathBuf],
+    max_bytes: Option<usize>,
+) -> Result<LoadedAskFiles, AppError> {
+    let mut files = Vec::new();
+    let mut total_bytes = 0;
+
+    for path in paths {
+        let Some(file) = load_ask_file(path)? else {
+            continue;
+        };
+
+        total_bytes += file.bytes;
+        if let Some(max_bytes) = max_bytes
+            && total_bytes > max_bytes
+        {
+            return Err(AppError::max_bytes_exceeded(max_bytes, total_bytes));
+        }
+
+        files.push(file);
+    }
+
+    Ok(LoadedAskFiles { files, total_bytes })
 }
 
 fn validate_path(path: &Path, recursive: bool) -> Result<(), AppError> {
@@ -97,6 +138,29 @@ fn collect_path_candidates(path: &Path, filters: &CandidateFilters, candidates: 
             candidates.push(entry_path);
         }
     }
+}
+
+fn load_ask_file(path: &Path) -> Result<Option<LoadedAskFile>, AppError> {
+    if path.is_symlink() || !path.is_file() {
+        return Ok(None);
+    }
+
+    let bytes = fs::read(path).map_err(|error| AppError::file_read(path, &error))?;
+    if is_binary_file(&bytes) {
+        return Ok(None);
+    }
+
+    let content = match String::from_utf8(bytes) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+
+    let bytes = content.len();
+    Ok(Some(LoadedAskFile {
+        path: path.to_path_buf(),
+        content,
+        bytes,
+    }))
 }
 
 fn should_prune_dir(entry: &DirEntry) -> bool {
@@ -173,6 +237,10 @@ fn matches_glob(globs: &GlobSet, path: &Path) -> bool {
             .is_some_and(|file_name| globs.is_match(Path::new(file_name)))
 }
 
+fn is_binary_file(bytes: &[u8]) -> bool {
+    bytes.contains(&0)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -184,7 +252,7 @@ mod tests {
 
     use crate::error::AppError;
 
-    use super::{collect_ask_candidates, validate_ask_paths};
+    use super::{collect_ask_candidates, load_ask_files, validate_ask_paths};
 
     #[test]
     fn missing_path_returns_missing_path_error() {
@@ -296,10 +364,89 @@ mod tests {
         validate_ask_paths(&[file], false).expect("file path should pass");
     }
 
+    #[test]
+    fn binary_file_skips_load() {
+        let dir = TestDir::new("binary");
+        let binary = dir.path.join("input.bin");
+        let text = dir.path.join("input.txt");
+        write_bytes(&binary, b"bin\0data");
+        write_text(&text, "text");
+
+        let loaded = load_ask_files(&[binary, text.clone()], None).expect("load should pass");
+
+        assert_eq!(loaded.total_bytes, 4);
+        assert_eq!(loaded.files.len(), 1);
+        assert_eq!(loaded.files[0].path, text);
+        assert_eq!(loaded.files[0].content, "text");
+    }
+
+    #[test]
+    fn non_utf8_file_skips_load() {
+        let dir = TestDir::new("utf8");
+        let invalid = dir.path.join("bad.txt");
+        let text = dir.path.join("good.txt");
+        write_bytes(&invalid, &[0x66, 0x6f, 0x80]);
+        write_text(&text, "ok");
+
+        let loaded = load_ask_files(&[invalid, text.clone()], None).expect("load should pass");
+
+        assert_eq!(loaded.total_bytes, 2);
+        assert_eq!(loaded.files.len(), 1);
+        assert_eq!(loaded.files[0].path, text);
+        assert_eq!(loaded.files[0].content, "ok");
+    }
+
+    #[test]
+    fn load_counts_total_bytes() {
+        let dir = TestDir::new("bytes");
+        let alpha = dir.path.join("alpha.txt");
+        let beta = dir.path.join("beta.txt");
+        write_text(&alpha, "ab");
+        write_text(&beta, "cde");
+
+        let loaded =
+            load_ask_files(&[alpha.clone(), beta.clone()], None).expect("load should pass");
+
+        assert_eq!(loaded.total_bytes, 5);
+        assert_eq!(loaded.files.len(), 2);
+        assert_eq!(loaded.files[0].bytes, 2);
+        assert_eq!(loaded.files[1].bytes, 3);
+    }
+
+    #[test]
+    fn load_fails_when_max_bytes_exceeded() {
+        let dir = TestDir::new("max-bytes");
+        let file = dir.path.join("input.txt");
+        write_text(&file, "abc");
+
+        let error = load_ask_files(&[file], Some(2)).expect_err("load should fail");
+
+        match error {
+            AppError::MaxBytesExceeded {
+                max_bytes,
+                actual_bytes,
+            } => {
+                assert_eq!(max_bytes, 2);
+                assert_eq!(actual_bytes, 3);
+            }
+            other => panic!("expected max-bytes error, got {other:?}"),
+        }
+    }
+
     fn write_file(path: &Path) {
+        write_text(path, "stub");
+    }
+
+    fn write_text(path: &Path, content: &str) {
         let parent = path.parent().expect("file should have parent");
         fs::create_dir_all(parent).expect("parent dir should create");
-        fs::write(path, "stub").expect("file should write");
+        fs::write(path, content).expect("file should write");
+    }
+
+    fn write_bytes(path: &Path, content: &[u8]) {
+        let parent = path.parent().expect("file should have parent");
+        fs::create_dir_all(parent).expect("parent dir should create");
+        fs::write(path, content).expect("file should write");
     }
 
     struct TestDir {

@@ -1,4 +1,4 @@
-use std::{path::Path, process::ExitCode};
+use std::{io, path::Path, process::ExitCode};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -11,6 +11,13 @@ pub enum AppError {
     MissingPath { path: String },
     #[error("`--recursive` required for directory path: {path}")]
     DirectoryRequiresRecursive { path: String },
+    #[error("failed to read file: {path}: {message}")]
+    FileRead { path: String, message: String },
+    #[error("input bytes exceed `--max-bytes`: {actual_bytes} > {max_bytes}")]
+    MaxBytesExceeded {
+        max_bytes: usize,
+        actual_bytes: usize,
+    },
     #[error("`cowork ask` not implemented yet")]
     AskNotImplemented,
 }
@@ -38,10 +45,29 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn file_read(path: &Path, error: &io::Error) -> Self {
+        Self::FileRead {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        }
+    }
+
+    #[must_use]
+    pub fn max_bytes_exceeded(max_bytes: usize, actual_bytes: usize) -> Self {
+        Self::MaxBytesExceeded {
+            max_bytes,
+            actual_bytes,
+        }
+    }
+
+    #[must_use]
     pub fn exit_code(&self) -> ExitCode {
         match self {
             Self::InvalidArguments { .. } | Self::AskNotImplemented => ExitCode::from(1),
-            Self::MissingPath { .. } | Self::DirectoryRequiresRecursive { .. } => ExitCode::from(2),
+            Self::MissingPath { .. }
+            | Self::DirectoryRequiresRecursive { .. }
+            | Self::FileRead { .. } => ExitCode::from(2),
+            Self::MaxBytesExceeded { .. } => ExitCode::from(3),
         }
     }
 
@@ -56,6 +82,8 @@ impl AppError {
             Self::InvalidArguments { .. } => "INVALID_ARGUMENTS",
             Self::MissingPath { .. } => "MISSING_PATH",
             Self::DirectoryRequiresRecursive { .. } => "DIRECTORY_REQUIRES_RECURSIVE",
+            Self::FileRead { .. } => "FILE_READ_FAILED",
+            Self::MaxBytesExceeded { .. } => "MAX_BYTES_EXCEEDED",
             Self::AskNotImplemented => "ASK_NOT_IMPLEMENTED",
         }
     }
@@ -73,6 +101,8 @@ impl AppError {
             Self::DirectoryRequiresRecursive { .. } => {
                 Some("Pass `--recursive` for directory inputs.")
             }
+            Self::FileRead { .. } => Some("Check file exists and is readable."),
+            Self::MaxBytesExceeded { .. } => Some("Pass larger `--max-bytes` or fewer files."),
             Self::AskNotImplemented => None,
         }
     }
@@ -170,6 +200,36 @@ mod tests {
                     "code": "DIRECTORY_REQUIRES_RECURSIVE",
                     "message": "`--recursive` required for directory path: src",
                     "hint": "Pass `--recursive` for directory inputs."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn max_bytes_exceeded_maps_to_exit_code_three() {
+        assert_eq!(
+            AppError::max_bytes_exceeded(1, 2).exit_code(),
+            ExitCode::from(3)
+        );
+    }
+
+    #[test]
+    fn max_bytes_exceeded_serializes_as_json_error() {
+        let value = serde_json::from_str::<serde_json::Value>(
+            &AppError::max_bytes_exceeded(1, 2).to_json(),
+        )
+        .expect("error json should parse");
+
+        assert_eq!(
+            value,
+            json!({
+                "schema_version": "1.0",
+                "command": "ask",
+                "status": "error",
+                "error": {
+                    "code": "MAX_BYTES_EXCEEDED",
+                    "message": "input bytes exceed `--max-bytes`: 2 > 1",
+                    "hint": "Pass larger `--max-bytes` or fewer files."
                 }
             })
         );
