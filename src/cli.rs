@@ -21,6 +21,9 @@ pub enum Command {
     Ask(AskArgs),
     /// Check local setup for `ask`.
     Doctor(DoctorArgs),
+    /// Print agent install rules.
+    #[command(arg_required_else_help = true)]
+    Init(InitArgs),
 }
 
 /// Args for `cowork ask`.
@@ -75,11 +78,36 @@ pub struct DoctorArgs {
     pub host: Option<String>,
 }
 
+/// Args for `cowork init`.
+#[derive(Debug, Args)]
+pub struct InitArgs {
+    /// Agent target.
+    #[command(subcommand)]
+    pub agent: InitAgent,
+}
+
+/// Agent targets for `cowork init`.
+#[derive(Debug, Subcommand)]
+pub enum InitAgent {
+    /// Print rules for Codex.
+    Codex(InitPrintArgs),
+    /// Print rules for Claude.
+    Claude(InitPrintArgs),
+}
+
+/// Print mode for `cowork init`.
+#[derive(Clone, Copy, Debug, Args)]
+pub struct InitPrintArgs {
+    /// Print rules only.
+    #[arg(long, required = true)]
+    pub print: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, Command};
+    use super::{Cli, Command, InitAgent};
 
     #[test]
     fn ask_parses_required_flags() {
@@ -100,6 +128,7 @@ mod tests {
                 assert_eq!(args.question, "Where is CLI parsing defined?");
             }
             Command::Doctor(_) => panic!("expected ask command"),
+            Command::Init(_) => panic!("expected ask command"),
         }
     }
 
@@ -138,6 +167,7 @@ mod tests {
                 assert_eq!(args.host.as_deref(), Some("http://localhost:11434"));
             }
             Command::Ask(_) => panic!("expected doctor command"),
+            Command::Init(_) => panic!("expected doctor command"),
         }
     }
 
@@ -157,5 +187,56 @@ mod tests {
 
         assert!(help.contains("--model <MODEL>"));
         assert!(help.contains("--host <HOST>"));
+    }
+
+    #[test]
+    fn init_codex_parses_print_flag() {
+        let cli = Cli::try_parse_from(["cowork", "init", "codex", "--print"])
+            .expect("init args should parse");
+
+        match cli.command {
+            Command::Init(args) => match args.agent {
+                InitAgent::Codex(mode) => assert!(mode.print),
+                InitAgent::Claude(_) => panic!("expected codex init target"),
+            },
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn init_help_shows_agent_subcommands() {
+        let mut command = Cli::command();
+        let init = command
+            .find_subcommand_mut("init")
+            .expect("init subcommand should exist");
+        let mut help = Vec::new();
+
+        init.write_long_help(&mut help)
+            .expect("init help should render");
+
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("codex"));
+        assert!(help.contains("claude"));
+    }
+
+    #[test]
+    fn init_codex_help_shows_print_flag() {
+        let mut command = Cli::command();
+        let init = command
+            .find_subcommand_mut("init")
+            .expect("init subcommand should exist");
+        let codex = init
+            .find_subcommand_mut("codex")
+            .expect("codex init target should exist");
+        let mut help = Vec::new();
+
+        codex
+            .write_long_help(&mut help)
+            .expect("codex init help should render");
+
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("--print"));
     }
 }

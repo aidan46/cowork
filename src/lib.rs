@@ -15,12 +15,12 @@ use std::{env, path::Path, process::ExitCode};
 
 use clap::{Parser, error::ErrorKind};
 
-pub use cli::{AskArgs, Cli, Command, DoctorArgs};
+pub use cli::{AskArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitPrintArgs};
 use config::resolve_ask_config;
 use error::{AppError, DoctorExit};
 use files::{collect_ask_candidates, load_ask_files};
 use model::DoctorProbeErrorKind;
-use output::{DoctorCheck, DoctorOutput};
+use output::{DoctorCheck, DoctorOutput, render_init_rules};
 use prompt::render_ask_prompt;
 
 /// Run `cowork`.
@@ -41,6 +41,7 @@ fn try_run() -> Result<ExitCode, AppError> {
     match cli.command {
         Command::Ask(args) => run_ask(args),
         Command::Doctor(args) => run_doctor(args),
+        Command::Init(args) => run_init(args),
     }
 }
 
@@ -101,6 +102,18 @@ fn run_doctor(args: DoctorArgs) -> Result<ExitCode, AppError> {
     println!("{}", result.json);
 
     Ok(result.exit_code)
+}
+
+fn run_init(args: InitArgs) -> Result<ExitCode, AppError> {
+    let rules = match args.agent {
+        InitAgent::Codex(mode) if mode.print => render_init_rules("codex"),
+        InitAgent::Claude(mode) if mode.print => render_init_rules("claude"),
+        _ => unreachable!("clap requires `--print`"),
+    };
+
+    println!("{rules}");
+
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_doctor_json(args: DoctorArgs) -> Result<DoctorRunResult, AppError> {

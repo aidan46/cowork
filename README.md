@@ -39,6 +39,13 @@ Run from repo root:
 cargo run -- doctor --model your-model
 ```
 
+Print agent rules next, no file writes yet:
+
+```bash
+cargo run -- init codex --print
+cargo run -- init claude --print
+```
+
 If `doctor` passes, ask next:
 
 ```bash
@@ -119,7 +126,8 @@ Example success shape:
 
 ## Scope today
 
-- two subcommands: `doctor`, `ask`
+- three subcommands: `doctor`, `ask`, `init`
+- `init --print` prints short agent rules, no write mode yet
 - JSON stdout only, even on errors
 - one Ollama-style model client
 - no cache, daemon, or index layer
@@ -128,4 +136,4 @@ Example success shape:
 
 - read [SUPPORT.md](SUPPORT.md) for usage questions and bug reports
 - read [CONTRIBUTING.md](CONTRIBUTING.md) before opening PR
-- use `cargo run -- doctor --help` and `cargo run -- ask --help` for current flag surface
+- use `cargo run -- doctor --help`, `cargo run -- ask --help`, and `cargo run -- init --help` for current flag surface

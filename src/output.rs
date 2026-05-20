@@ -4,9 +4,44 @@ use crate::error::AppError;
 
 const SCHEMA_VERSION: &str = "1.0";
 const ASK_COMMAND: &str = "ask";
+const CLI_COMMAND: &str = "cli";
 const DOCTOR_COMMAND: &str = "doctor";
 const STATUS_OK: &str = "ok";
 const STATUS_ERROR: &str = "error";
+const CODEX_INIT_RULES: &str = r#"# cowork rules for Codex
+
+- Use `cowork ask` before reading more than 3 files or any large file.
+- Ask narrow questions, example: `cowork ask --paths src/cli.rs src/lib.rs --question "How does init print flow work?"`
+- Ask narrow questions, example: `cowork ask --paths src/output.rs --question "Where are init rules defined?"`
+- Do not use `cowork ask` for whole-repo summaries, final authority, or write plans without code evidence.
+- If setup fails, run `cowork doctor`.
+- Inspect `next_reads` yourself before acting.
+- Treat local model output as lead, not authority.
+"#;
+const CLAUDE_INIT_RULES: &str = r#"# cowork rules for Claude
+
+- Use `cowork ask` before reading more than 3 files or any large file.
+- Ask narrow questions, example: `cowork ask --paths src/cli.rs src/lib.rs --question "How does init print flow work?"`
+- Ask narrow questions, example: `cowork ask --paths src/output.rs --question "Where are init rules defined?"`
+- Do not use `cowork ask` for whole-repo summaries, final authority, or write plans without code evidence.
+- If setup fails, run `cowork doctor`.
+- Inspect `next_reads` yourself before acting.
+- Treat local model output as lead, not authority.
+"#;
+
+#[must_use]
+pub(crate) fn cli_command() -> &'static str {
+    CLI_COMMAND
+}
+
+#[must_use]
+pub(crate) fn render_init_rules(agent: &str) -> &'static str {
+    match agent {
+        "codex" => CODEX_INIT_RULES,
+        "claude" => CLAUDE_INIT_RULES,
+        _ => unreachable!("unsupported init agent"),
+    }
+}
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub(crate) struct AskOutput {
@@ -260,7 +295,9 @@ pub(crate) fn parse_doctor_probe(raw_json: &str) -> Result<(), String> {
 mod tests {
     use serde_json::json;
 
-    use super::{DoctorCheck, DoctorOutput, parse_ask_output, parse_doctor_probe};
+    use super::{
+        DoctorCheck, DoctorOutput, parse_ask_output, parse_doctor_probe, render_init_rules,
+    };
     use crate::error::AppError;
 
     #[test]
@@ -414,6 +451,28 @@ mod tests {
         let error = parse_doctor_probe(r#"{"ready":true}"#).expect_err("probe should fail");
 
         assert!(error.contains("failed to parse doctor probe JSON"));
+    }
+
+    #[test]
+    fn codex_init_rules_keep_required_markers() {
+        let rules = render_init_rules("codex");
+
+        assert!(rules.contains("# cowork rules for Codex"));
+        assert!(rules.contains("cowork ask"));
+        assert!(rules.contains("cowork doctor"));
+        assert!(rules.contains("next_reads"));
+        assert!(rules.contains("lead, not authority"));
+    }
+
+    #[test]
+    fn claude_init_rules_keep_required_markers() {
+        let rules = render_init_rules("claude");
+
+        assert!(rules.contains("# cowork rules for Claude"));
+        assert!(rules.contains("cowork ask"));
+        assert!(rules.contains("cowork doctor"));
+        assert!(rules.contains("next_reads"));
+        assert!(rules.contains("lead, not authority"));
     }
 
     fn valid_model_json() -> String {
