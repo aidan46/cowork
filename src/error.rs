@@ -3,7 +3,7 @@ use std::{io, path::Path, process::ExitCode};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::output::cli_command;
+use crate::output::{cli_command, init_command};
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -15,6 +15,8 @@ pub enum AppError {
     DirectoryRequiresRecursive { path: String },
     #[error("failed to read file: {path}: {message}")]
     FileRead { path: String, message: String },
+    #[error("failed to update init file: {path}: {message}")]
+    InitFileUpdate { path: String, message: String },
     #[error("input bytes exceed `--max-bytes`: {actual_bytes} > {max_bytes}")]
     MaxBytesExceeded {
         max_bytes: usize,
@@ -68,6 +70,14 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn init_file_update(path: &Path, message: impl Into<String>) -> Self {
+        Self::InitFileUpdate {
+            path: path.display().to_string(),
+            message: message.into(),
+        }
+    }
+
+    #[must_use]
     pub fn max_bytes_exceeded(max_bytes: usize, actual_bytes: usize) -> Self {
         Self::MaxBytesExceeded {
             max_bytes,
@@ -95,7 +105,8 @@ impl AppError {
             Self::InvalidArguments { .. } => ExitCode::from(1),
             Self::MissingPath { .. }
             | Self::DirectoryRequiresRecursive { .. }
-            | Self::FileRead { .. } => ExitCode::from(2),
+            | Self::FileRead { .. }
+            | Self::InitFileUpdate { .. } => ExitCode::from(2),
             Self::MaxBytesExceeded { .. } => ExitCode::from(3),
             Self::ModelRequestFailed { .. } => ExitCode::from(4),
             Self::ResponseParseFailed { .. } => ExitCode::from(5),
@@ -114,6 +125,7 @@ impl AppError {
             Self::MissingPath { .. } => "MISSING_PATH",
             Self::DirectoryRequiresRecursive { .. } => "DIRECTORY_REQUIRES_RECURSIVE",
             Self::FileRead { .. } => "FILE_READ_FAILED",
+            Self::InitFileUpdate { .. } => "INIT_FILE_UPDATE_FAILED",
             Self::MaxBytesExceeded { .. } => "MAX_BYTES_EXCEEDED",
             Self::ModelRequestFailed { .. } => "MODEL_REQUEST_FAILED",
             Self::ResponseParseFailed { .. } => "RESPONSE_PARSE_FAILED",
@@ -124,6 +136,7 @@ impl AppError {
     fn command(&self) -> &'static str {
         match self {
             Self::InvalidArguments { .. } => cli_command(),
+            Self::InitFileUpdate { .. } => init_command(),
             Self::MissingPath { .. }
             | Self::DirectoryRequiresRecursive { .. }
             | Self::FileRead { .. }
@@ -142,6 +155,9 @@ impl AppError {
                 Some("Pass `--recursive` for directory inputs.")
             }
             Self::FileRead { .. } => Some("Check file exists and is readable."),
+            Self::InitFileUpdate { .. } => {
+                Some("Check target file perms and managed block markers.")
+            }
             Self::MaxBytesExceeded { .. } => Some("Pass larger `--max-bytes` or fewer files."),
             Self::ModelRequestFailed { .. } => Some("Check Ollama server, model, and `--host`."),
             Self::ResponseParseFailed { .. } => Some("Check Ollama response and ask JSON schema."),
