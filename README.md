@@ -2,11 +2,24 @@
 
 Focus repo question in, deterministic JSON out.
 
-`cowork` is local CLI for coding agents. It reads only files you point at, sends one narrow prompt to an Ollama-compatible `/api/generate` endpoint, then prints schema-checked JSON on stdout.
+`cowork` is local CLI for coding agents. It reads only files you point at, sends one narrow prompt to local Ollama-compatible `/api/generate` endpoint, then prints schema-checked JSON on stdout.
+
+Main win: cut expensive cloud-model context use. Instead of pasting raw repo files into hosted model, agent can ask `cowork` for narrow local analysis and get back compact JSON.
+
+## About
+
+`cowork` is for mixed local-plus-cloud workflows.
+
+- local model does narrow repo read
+- hosted model gets small structured result
+- cloud token use drops because raw file dumps stay out of hosted context
+- output stays deterministic enough for scripts and agents
+
+It does not remove token use entirely. It shifts repo-context work from expensive hosted context toward cheaper local inference.
 
 ## Why it exists
 
-When agent or script needs one repo-grounded answer, whole-repo scans and chatty output are waste. `cowork` keeps context small, config simple, output stable.
+When agent or script needs one repo-grounded answer, whole-repo scans and raw file paste are waste. `cowork` keeps hosted context small, config simple, output stable.
 
 ## Quickstart
 
