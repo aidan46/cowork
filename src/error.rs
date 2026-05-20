@@ -3,6 +3,8 @@ use std::{io, path::Path, process::ExitCode};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::output::cli_command;
+
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("{message}")]
@@ -120,13 +122,21 @@ impl AppError {
 
     #[must_use]
     fn command(&self) -> &'static str {
-        "ask"
+        match self {
+            Self::InvalidArguments { .. } => cli_command(),
+            Self::MissingPath { .. }
+            | Self::DirectoryRequiresRecursive { .. }
+            | Self::FileRead { .. }
+            | Self::MaxBytesExceeded { .. }
+            | Self::ModelRequestFailed { .. }
+            | Self::ResponseParseFailed { .. } => "ask",
+        }
     }
 
     #[must_use]
     fn hint(&self) -> Option<&'static str> {
         match self {
-            Self::InvalidArguments { .. } => Some("Use `cowork ask --help`."),
+            Self::InvalidArguments { .. } => Some("Use `cowork --help`."),
             Self::MissingPath { .. } => Some("Check path spelling and current dir."),
             Self::DirectoryRequiresRecursive { .. } => {
                 Some("Pass `--recursive` for directory inputs.")
@@ -198,6 +208,28 @@ mod tests {
         assert_eq!(
             AppError::invalid_arguments("bad flag").exit_code(),
             ExitCode::from(1)
+        );
+    }
+
+    #[test]
+    fn invalid_arguments_serialize_as_cli_error() {
+        let value = serde_json::from_str::<serde_json::Value>(
+            &AppError::invalid_arguments("bad flag").to_json(),
+        )
+        .expect("error json should parse");
+
+        assert_eq!(
+            value,
+            json!({
+                "schema_version": "1.0",
+                "command": "cli",
+                "status": "error",
+                "error": {
+                    "code": "INVALID_ARGUMENTS",
+                    "message": "bad flag",
+                    "hint": "Use `cowork --help`."
+                }
+            })
         );
     }
 
