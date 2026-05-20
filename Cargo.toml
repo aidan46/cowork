@@ -1,7 +1,10 @@
 [package]
 name = "cowork"
 version = "0.1.0"
+description = "Local CLI for coding agents, narrow repo answers in deterministic JSON."
 edition = "2024"
+readme = "README.md"
+repository = "https://github.com/aidan46/cowork"
 
 [lints.rust]
 missing_docs = "deny"

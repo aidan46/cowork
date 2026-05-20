@@ -23,6 +23,8 @@ When agent or script needs one repo-grounded answer, whole-repo scans and raw fi
 
 ## Quickstart
 
+Current release path is source-only. Use cloned repo plus Cargo. No crates.io package or prebuilt binaries yet.
+
 Need:
 
 - Rust toolchain
