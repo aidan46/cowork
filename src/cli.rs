@@ -19,6 +19,8 @@ pub enum Command {
     /// Ask about file context.
     #[command(arg_required_else_help = true)]
     Ask(AskArgs),
+    /// Check local setup for `ask`.
+    Doctor(DoctorArgs),
 }
 
 /// Args for `cowork ask`.
@@ -61,6 +63,18 @@ pub struct AskArgs {
     pub fail_on_missing: bool,
 }
 
+/// Args for `cowork doctor`.
+#[derive(Debug, Args)]
+pub struct DoctorArgs {
+    /// Model override.
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+
+    /// Host override.
+    #[arg(long, value_name = "HOST")]
+    pub host: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use clap::{CommandFactory, Parser};
@@ -85,6 +99,7 @@ mod tests {
                 assert_eq!(args.paths.len(), 2);
                 assert_eq!(args.question, "Where is CLI parsing defined?");
             }
+            Command::Doctor(_) => panic!("expected ask command"),
         }
     }
 
@@ -103,5 +118,44 @@ mod tests {
 
         assert!(help.contains("--paths <PATHS>..."));
         assert!(help.contains("--question <QUESTION>"));
+    }
+
+    #[test]
+    fn doctor_parses_optional_flags() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "doctor",
+            "--model",
+            "gemma3:12b",
+            "--host",
+            "http://localhost:11434",
+        ])
+        .expect("doctor args should parse");
+
+        match cli.command {
+            Command::Doctor(args) => {
+                assert_eq!(args.model.as_deref(), Some("gemma3:12b"));
+                assert_eq!(args.host.as_deref(), Some("http://localhost:11434"));
+            }
+            Command::Ask(_) => panic!("expected doctor command"),
+        }
+    }
+
+    #[test]
+    fn doctor_help_shows_optional_flags() {
+        let mut command = Cli::command();
+        let doctor = command
+            .find_subcommand_mut("doctor")
+            .expect("doctor subcommand should exist");
+        let mut help = Vec::new();
+
+        doctor
+            .write_long_help(&mut help)
+            .expect("doctor help should render");
+
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("--model <MODEL>"));
+        assert!(help.contains("--host <HOST>"));
     }
 }

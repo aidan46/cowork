@@ -1,4 +1,7 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
 
@@ -14,6 +17,8 @@ pub struct ResolvedAskConfig {
     pub model: Option<String>,
     /// Host after config merge.
     pub host: String,
+    /// Config files read during merge.
+    pub loaded_files: Vec<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -35,11 +40,15 @@ pub fn resolve_ask_config(
     cli_model: Option<String>,
     cli_host: Option<String>,
 ) -> Result<ResolvedAskConfig, AppError> {
-    let user_config = home_dir
-        .map(|home| load_optional_ask_config(&home.join(".cowork/config.toml")))
+    let mut loaded_files = Vec::new();
+    let user_path = home_dir.map(|home| home.join(".cowork/config.toml"));
+    let project_path = project_dir.join("cowork.toml");
+    let user_config = user_path
+        .as_deref()
+        .map(|path| load_optional_ask_config(path, &mut loaded_files))
         .transpose()?
         .unwrap_or_default();
-    let project_config = load_optional_ask_config(&project_dir.join("cowork.toml"))?;
+    let project_config = load_optional_ask_config(&project_path, &mut loaded_files)?;
 
     Ok(ResolvedAskConfig {
         model: cli_model.or(project_config.model).or(user_config.model),
@@ -47,10 +56,14 @@ pub fn resolve_ask_config(
             .or(project_config.host)
             .or(user_config.host)
             .unwrap_or_else(|| DEFAULT_HOST.to_string()),
+        loaded_files,
     })
 }
 
-fn load_optional_ask_config(path: &Path) -> Result<AskConfig, AppError> {
+fn load_optional_ask_config(
+    path: &Path,
+    loaded_files: &mut Vec<PathBuf>,
+) -> Result<AskConfig, AppError> {
     if !path.exists() {
         return Ok(AskConfig::default());
     }
@@ -67,6 +80,7 @@ fn load_optional_ask_config(path: &Path) -> Result<AskConfig, AppError> {
             path.display()
         ))
     })?;
+    loaded_files.push(path.to_path_buf());
 
     Ok(parsed.ask)
 }
@@ -90,6 +104,7 @@ mod tests {
 
         assert_eq!(config.model, None);
         assert_eq!(config.host, DEFAULT_HOST);
+        assert!(config.loaded_files.is_empty());
     }
 
     #[test]
@@ -109,6 +124,13 @@ mod tests {
 
         assert_eq!(config.model.as_deref(), Some("project-model"));
         assert_eq!(config.host, "http://project-host");
+        assert_eq!(
+            config.loaded_files,
+            vec![
+                dirs.home.join(".cowork/config.toml"),
+                dirs.project.join("cowork.toml")
+            ]
+        );
     }
 
     #[test]
@@ -124,6 +146,7 @@ mod tests {
 
         assert_eq!(config.model, None);
         assert_eq!(config.host, DEFAULT_HOST);
+        assert!(config.loaded_files.is_empty());
     }
 
     #[test]
@@ -148,6 +171,13 @@ mod tests {
 
         assert_eq!(config.model.as_deref(), Some("cli-model"));
         assert_eq!(config.host, "http://cli-host");
+        assert_eq!(
+            config.loaded_files,
+            vec![
+                dirs.home.join(".cowork/config.toml"),
+                dirs.project.join("cowork.toml")
+            ]
+        );
     }
 
     struct TestDirs {

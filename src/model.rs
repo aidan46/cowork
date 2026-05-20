@@ -1,34 +1,49 @@
 use std::{error::Error as _, time::Duration};
 
-use reqwest::blocking::Client;
+use reqwest::{Url, blocking::Client};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+const DOCTOR_PROMPT: &str = r#"Return strict JSON only with exact shape {"ok":true}."#;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DoctorProbeErrorKind {
+    BadHost,
+    UnreachableHost,
+    ProbeRequestFailed,
+    InvalidProbeJson,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct DoctorProbeError {
+    pub(crate) kind: DoctorProbeErrorKind,
+    pub(crate) message: String,
+}
+
+#[derive(Serialize)]
+struct GenerateRequest<'a> {
+    model: &'a str,
+    prompt: &'a str,
+    stream: bool,
+    format: &'a str,
+    options: GenerateOptions,
+}
+
+#[derive(Serialize)]
+struct GenerateOptions {
+    temperature: u8,
+}
+
+#[derive(Deserialize)]
+struct GenerateResponse {
+    response: String,
+}
 
 /// Send one Ollama generate req, return raw model text.
 pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<String, AppError> {
-    #[derive(Serialize)]
-    struct GenerateRequest<'a> {
-        model: &'a str,
-        prompt: &'a str,
-        stream: bool,
-        format: &'a str,
-        options: GenerateOptions,
-    }
-
-    #[derive(Serialize)]
-    struct GenerateOptions {
-        temperature: u8,
-    }
-
-    #[derive(Deserialize)]
-    struct GenerateResponse {
-        response: String,
-    }
-
     let client = Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
@@ -39,9 +54,10 @@ pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<
                 &error,
             ))
         })?;
+    let endpoint = build_generate_url(host).map_err(AppError::model_request_failed)?;
 
     let response = client
-        .post(format!("{}/api/generate", host.trim_end_matches('/')))
+        .post(endpoint)
         .json(&GenerateRequest {
             model,
             prompt,
@@ -72,6 +88,109 @@ pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<
         })
 }
 
+pub(crate) fn validate_generate_host(host: &str) -> Result<(), DoctorProbeError> {
+    build_generate_url(host)
+        .map(|_| ())
+        .map_err(DoctorProbeError::bad_host)
+}
+
+pub(crate) fn request_doctor_probe(host: &str, model: &str) -> Result<String, DoctorProbeError> {
+    let client = Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| {
+            DoctorProbeError::probe_request_failed(format_reqwest_error(
+                "failed to build doctor client",
+                &error,
+            ))
+        })?;
+    let endpoint = build_generate_url(host).map_err(DoctorProbeError::bad_host)?;
+
+    let response = client
+        .post(endpoint)
+        .json(&GenerateRequest {
+            model,
+            prompt: DOCTOR_PROMPT,
+            stream: false,
+            format: "json",
+            options: GenerateOptions { temperature: 0 },
+        })
+        .send()
+        .map_err(|error| {
+            if error.is_connect() || error.is_timeout() {
+                DoctorProbeError::unreachable_host(format_reqwest_error(
+                    "failed to reach /api/generate",
+                    &error,
+                ))
+            } else {
+                DoctorProbeError::probe_request_failed(format_reqwest_error(
+                    "doctor probe request failed",
+                    &error,
+                ))
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(DoctorProbeError::probe_request_failed(format!(
+            "doctor probe failed with status {}",
+            response.status().as_u16()
+        )));
+    }
+
+    response
+        .json::<GenerateResponse>()
+        .map(|envelope| envelope.response)
+        .map_err(|error| {
+            DoctorProbeError::invalid_probe_json(format!(
+                "failed to parse doctor probe response: {error}"
+            ))
+        })
+}
+
+impl DoctorProbeError {
+    fn bad_host(message: impl Into<String>) -> Self {
+        Self {
+            kind: DoctorProbeErrorKind::BadHost,
+            message: message.into(),
+        }
+    }
+
+    fn unreachable_host(message: impl Into<String>) -> Self {
+        Self {
+            kind: DoctorProbeErrorKind::UnreachableHost,
+            message: message.into(),
+        }
+    }
+
+    fn probe_request_failed(message: impl Into<String>) -> Self {
+        Self {
+            kind: DoctorProbeErrorKind::ProbeRequestFailed,
+            message: message.into(),
+        }
+    }
+
+    fn invalid_probe_json(message: impl Into<String>) -> Self {
+        Self {
+            kind: DoctorProbeErrorKind::InvalidProbeJson,
+            message: message.into(),
+        }
+    }
+}
+
+fn build_generate_url(host: &str) -> Result<Url, String> {
+    let mut base = host.trim().to_string();
+    if !base.ends_with('/') {
+        base.push('/');
+    }
+
+    let base =
+        Url::parse(&base).map_err(|error| format!("failed to parse host URL `{host}`: {error}"))?;
+
+    base.join("api/generate")
+        .map_err(|error| format!("failed to build `/api/generate` URL from `{host}`: {error}"))
+}
+
 fn format_reqwest_error(prefix: &str, error: &reqwest::Error) -> String {
     let mut message = format!("{prefix}: {error}");
     let mut source = error.source();
@@ -96,7 +215,9 @@ mod tests {
 
     use serde_json::json;
 
-    use super::request_generate;
+    use super::{
+        DoctorProbeErrorKind, request_doctor_probe, request_generate, validate_generate_host,
+    };
     use crate::error::AppError;
 
     #[test]
@@ -160,6 +281,23 @@ mod tests {
 
         handle.join().expect("server should join");
         assert_eq!(result, r#"{"answer":"ok"}"#);
+    }
+
+    #[test]
+    fn doctor_probe_returns_raw_probe_json() {
+        let (host, handle) = spawn_server(ok_response(&response_envelope(r#"{"ok":true}"#)));
+
+        let result = request_doctor_probe(&host, "gemma3:12b").expect("doctor probe should pass");
+
+        handle.join().expect("server should join");
+        assert_eq!(result, r#"{"ok":true}"#);
+    }
+
+    #[test]
+    fn bad_host_fails_before_request() {
+        let error = validate_generate_host("://bad").expect_err("bad host should fail");
+
+        assert_eq!(error.kind, DoctorProbeErrorKind::BadHost);
     }
 
     fn spawn_server(response: String) -> (String, thread::JoinHandle<Vec<u8>>) {

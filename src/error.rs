@@ -24,6 +24,17 @@ pub enum AppError {
     ResponseParseFailed { message: String },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DoctorExit {
+    Ok,
+    InvalidConfig,
+    BadHost,
+    MissingModel,
+    UnreachableHost,
+    ProbeRequestFailed,
+    InvalidProbeJson,
+}
+
 impl AppError {
     #[must_use]
     pub fn invalid_arguments(message: impl Into<String>) -> Self {
@@ -128,6 +139,21 @@ impl AppError {
     }
 }
 
+impl DoctorExit {
+    #[must_use]
+    pub fn exit_code(self) -> ExitCode {
+        match self {
+            Self::Ok => ExitCode::SUCCESS,
+            Self::InvalidConfig => ExitCode::from(1),
+            Self::BadHost => ExitCode::from(6),
+            Self::MissingModel => ExitCode::from(7),
+            Self::UnreachableHost => ExitCode::from(8),
+            Self::ProbeRequestFailed => ExitCode::from(9),
+            Self::InvalidProbeJson => ExitCode::from(10),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ErrorResponse<'a> {
     schema_version: &'a str,
@@ -165,7 +191,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::AppError;
+    use super::{AppError, DoctorExit};
 
     #[test]
     fn invalid_arguments_maps_to_exit_code_one() {
@@ -249,5 +275,25 @@ mod tests {
             AppError::response_parse_failed("bad json").exit_code(),
             ExitCode::from(5)
         );
+    }
+
+    #[test]
+    fn doctor_bad_host_maps_to_exit_code_six() {
+        assert_eq!(DoctorExit::BadHost.exit_code(), ExitCode::from(6));
+    }
+
+    #[test]
+    fn doctor_missing_model_maps_to_exit_code_seven() {
+        assert_eq!(DoctorExit::MissingModel.exit_code(), ExitCode::from(7));
+    }
+
+    #[test]
+    fn doctor_unreachable_host_maps_to_exit_code_eight() {
+        assert_eq!(DoctorExit::UnreachableHost.exit_code(), ExitCode::from(8));
+    }
+
+    #[test]
+    fn doctor_invalid_probe_json_maps_to_exit_code_ten() {
+        assert_eq!(DoctorExit::InvalidProbeJson.exit_code(), ExitCode::from(10));
     }
 }
