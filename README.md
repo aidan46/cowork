@@ -23,7 +23,13 @@ When agent or script needs one repo-grounded answer, whole-repo scans and raw fi
 
 ## Quickstart
 
-Current release path is source-only. Use cloned repo plus Cargo. No crates.io package or prebuilt binaries yet.
+Current install path is Git source install. No crates.io package or prebuilt binaries yet.
+
+Install:
+
+```bash
+cargo install --git https://github.com/aidan46/cowork --locked
+```
 
 Need:
 
@@ -33,30 +39,30 @@ Need:
 - one `--question`
 - `--model`, unless config already sets it
 
-Run from repo root:
+Verify install:
 
 ```bash
-cargo run -- doctor --model your-model
+cowork doctor --model your-model
 ```
 
 Print agent rules:
 
 ```bash
-cargo run -- init codex --print
-cargo run -- init claude --print
+cowork init codex --print
+cowork init claude --print
 ```
 
 Write managed agent blocks:
 
 ```bash
-cargo run -- init codex --write
-cargo run -- init claude --write
+cowork init codex --write
+cowork init claude --write
 ```
 
 If `doctor` passes, ask next:
 
 ```bash
-cargo run -- ask \
+cowork ask \
   --paths src/cli.rs src/config.rs \
   --question "How does ask config precedence work?" \
   --model your-model
@@ -144,4 +150,4 @@ Example success shape:
 
 - read [SUPPORT.md](SUPPORT.md) for usage questions and bug reports
 - read [CONTRIBUTING.md](CONTRIBUTING.md) before opening PR
-- use `cargo run -- doctor --help`, `cargo run -- ask --help`, and `cargo run -- init --help` for current flag surface
+- use `cowork doctor --help`, `cowork ask --help`, and `cowork init --help` for current flag surface
