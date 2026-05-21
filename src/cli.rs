@@ -19,6 +19,9 @@ pub enum Command {
     /// Ask about file context.
     #[command(arg_required_else_help = true)]
     Ask(AskArgs),
+    /// Locate likely files and symbols.
+    #[command(arg_required_else_help = true)]
+    Locate(LocateArgs),
     /// Check local setup for `ask`.
     Doctor(DoctorArgs),
     /// Print agent install rules.
@@ -36,6 +39,46 @@ pub struct AskArgs {
     /// Narrow question to answer.
     #[arg(long, required = true, value_name = "QUESTION")]
     pub question: String,
+
+    /// Model override.
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+
+    /// Host override.
+    #[arg(long, value_name = "HOST")]
+    pub host: Option<String>,
+
+    /// Max input bytes.
+    #[arg(long, value_name = "BYTES")]
+    pub max_bytes: Option<usize>,
+
+    /// Recurse into dirs.
+    #[arg(long)]
+    pub recursive: bool,
+
+    /// Include glob.
+    #[arg(long, value_name = "GLOB")]
+    pub include: Vec<String>,
+
+    /// Exclude glob.
+    #[arg(long, value_name = "GLOB")]
+    pub exclude: Vec<String>,
+
+    /// Fail on missing path.
+    #[arg(long)]
+    pub fail_on_missing: bool,
+}
+
+/// Args for `cowork locate`.
+#[derive(Debug, Args)]
+pub struct LocateArgs {
+    /// Files or dirs to inspect.
+    #[arg(long, required = true, num_args = 1.., value_name = "PATHS", value_hint = ValueHint::AnyPath)]
+    pub paths: Vec<PathBuf>,
+
+    /// Thing to locate.
+    #[arg(long, required = true, value_name = "THING")]
+    pub thing: String,
 
     /// Model override.
     #[arg(long, value_name = "MODEL")]
@@ -132,6 +175,7 @@ mod tests {
                 assert_eq!(args.paths.len(), 2);
                 assert_eq!(args.question, "Where is CLI parsing defined?");
             }
+            Command::Locate(_) => panic!("expected ask command"),
             Command::Doctor(_) => panic!("expected ask command"),
             Command::Init(_) => panic!("expected ask command"),
         }
@@ -155,6 +199,48 @@ mod tests {
     }
 
     #[test]
+    fn locate_parses_required_flags() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "locate",
+            "--paths",
+            "src",
+            "Cargo.toml",
+            "--thing",
+            "CLI parser",
+        ])
+        .expect("locate args should parse");
+
+        match cli.command {
+            Command::Locate(args) => {
+                assert_eq!(args.paths.len(), 2);
+                assert_eq!(args.thing, "CLI parser");
+            }
+            Command::Ask(_) => panic!("expected locate command"),
+            Command::Doctor(_) => panic!("expected locate command"),
+            Command::Init(_) => panic!("expected locate command"),
+        }
+    }
+
+    #[test]
+    fn locate_help_shows_required_flags() {
+        let mut command = Cli::command();
+        let locate = command
+            .find_subcommand_mut("locate")
+            .expect("locate subcommand should exist");
+        let mut help = Vec::new();
+
+        locate
+            .write_long_help(&mut help)
+            .expect("locate help should render");
+
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("--paths <PATHS>..."));
+        assert!(help.contains("--thing <THING>"));
+    }
+
+    #[test]
     fn doctor_parses_optional_flags() {
         let cli = Cli::try_parse_from([
             "cowork",
@@ -172,6 +258,7 @@ mod tests {
                 assert_eq!(args.host.as_deref(), Some("http://localhost:11434"));
             }
             Command::Ask(_) => panic!("expected doctor command"),
+            Command::Locate(_) => panic!("expected doctor command"),
             Command::Init(_) => panic!("expected doctor command"),
         }
     }

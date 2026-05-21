@@ -3,17 +3,16 @@ use std::fmt::Write as _;
 use crate::files::{LoadedAskFile, LoadedAskFiles};
 
 const ROLE_LINE: &str = "You are local coding coworker helping another coding agent inspect files.";
-const HARD_RULES: [&str; 8] = [
+const HARD_RULES: [&str; 7] = [
     "Use only provided files.",
     "Return valid JSON only.",
     "No Markdown.",
     "No prose outside JSON.",
     "No comments.",
     "Do not speculate beyond provided files.",
-    "If evidence missing, set answer.not_found = true.",
     "Keep next_reads inside provided paths or obvious adjacent files only.",
 ];
-const SCHEMA_BLOCK: &str = concat!(
+const ASK_SCHEMA_BLOCK: &str = concat!(
     "schema_version:string\n",
     "command:\"ask\"\n",
     "status:\"ok\"\n",
@@ -26,6 +25,14 @@ const SCHEMA_BLOCK: &str = concat!(
     "next_reads:[{path:string,reason:string}]\n",
     "metadata:{input_bytes:number,duration_ms:number}"
 );
+const LOCATE_SCHEMA_BLOCK: &str = concat!(
+    "schema_version:string\n",
+    "command:\"locate\"\n",
+    "status:\"ok\"\n",
+    "matches:[{path:string,symbol?:string,kind?:\"function\"|\"type\"|\"trait\"|\"impl\"|\"module\"|\"constant\"|\"variable\"|\"route\"|\"component\"|\"test\"|\"unknown\",reason:string,confidence:\"high\"|\"medium\"|\"low\"|\"unknown\"}]\n",
+    "next_reads:[{path:string,reason:string}]\n",
+    "risks:[{kind:\"missing_context\"|\"model_uncertainty\"|\"parse_error\"|\"skipped_file\"|\"unsupported_file\"|\"unknown\",message:string}]"
+);
 
 pub(crate) fn render_ask_prompt(question: &str, loaded_files: &LoadedAskFiles) -> String {
     let mut prompt = String::new();
@@ -34,13 +41,48 @@ pub(crate) fn render_ask_prompt(question: &str, loaded_files: &LoadedAskFiles) -
     for rule in HARD_RULES {
         writeln!(&mut prompt, "{rule}").expect("write to string");
     }
+    writeln!(
+        &mut prompt,
+        "If evidence missing, set answer.not_found = true."
+    )
+    .expect("write to string");
     writeln!(&mut prompt, "Keep output concise.").expect("write to string");
     writeln!(&mut prompt).expect("write to string");
     writeln!(&mut prompt, "Question:").expect("write to string");
     writeln!(&mut prompt, "{question}").expect("write to string");
     writeln!(&mut prompt).expect("write to string");
     writeln!(&mut prompt, "Schema:").expect("write to string");
-    writeln!(&mut prompt, "{SCHEMA_BLOCK}").expect("write to string");
+    writeln!(&mut prompt, "{ASK_SCHEMA_BLOCK}").expect("write to string");
+    writeln!(&mut prompt).expect("write to string");
+    writeln!(&mut prompt, "Files:").expect("write to string");
+
+    for file in &loaded_files.files {
+        render_file_block(&mut prompt, file);
+    }
+
+    prompt
+}
+
+pub(crate) fn render_locate_prompt(thing: &str, loaded_files: &LoadedAskFiles) -> String {
+    let mut prompt = String::new();
+
+    writeln!(&mut prompt, "{ROLE_LINE}").expect("write to string");
+    for rule in HARD_RULES {
+        writeln!(&mut prompt, "{rule}").expect("write to string");
+    }
+    writeln!(&mut prompt, "Find likely files and symbols only.").expect("write to string");
+    writeln!(&mut prompt, "No long explanation.").expect("write to string");
+    writeln!(&mut prompt, "No edit plan.").expect("write to string");
+    writeln!(&mut prompt, "Use empty arrays when unsure.").expect("write to string");
+    writeln!(&mut prompt).expect("write to string");
+    writeln!(&mut prompt, "Thing:").expect("write to string");
+    writeln!(&mut prompt, "{thing}").expect("write to string");
+    writeln!(&mut prompt).expect("write to string");
+    writeln!(&mut prompt, "Schema:").expect("write to string");
+    writeln!(&mut prompt, "{LOCATE_SCHEMA_BLOCK}").expect("write to string");
+    writeln!(&mut prompt).expect("write to string");
+    writeln!(&mut prompt, "Sort matches by confidence, then path.").expect("write to string");
+    writeln!(&mut prompt, "Keep next_reads short and concrete.").expect("write to string");
     writeln!(&mut prompt).expect("write to string");
     writeln!(&mut prompt, "Files:").expect("write to string");
 
@@ -64,7 +106,7 @@ fn render_file_block(prompt: &mut String, file: &LoadedAskFile) {
 mod tests {
     use std::path::PathBuf;
 
-    use super::render_ask_prompt;
+    use super::{render_ask_prompt, render_locate_prompt};
     use crate::files::{LoadedAskFile, LoadedAskFiles};
 
     #[test]
@@ -84,6 +126,15 @@ mod tests {
         assert!(prompt.contains("answer:{summary:string,confidence:"));
         assert!(prompt.contains("next_reads:[{path:string,reason:string}]"));
         assert!(prompt.contains("metadata:{input_bytes:number,duration_ms:number}"));
+    }
+
+    #[test]
+    fn locate_prompt_includes_locate_schema_fields() {
+        let prompt = render_locate_prompt("auth middleware", &loaded_files([]));
+
+        assert!(prompt.contains("command:\"locate\""));
+        assert!(prompt.contains("matches:[{path:string,symbol?:string"));
+        assert!(prompt.contains("risks:[{kind:\"missing_context\""));
     }
 
     #[test]
@@ -112,6 +163,13 @@ mod tests {
             .expect("second file");
 
         assert!(first < second);
+    }
+
+    #[test]
+    fn locate_prompt_includes_thing() {
+        let prompt = render_locate_prompt("auth middleware", &loaded_files([]));
+
+        assert!(prompt.contains("Thing:\nauth middleware"));
     }
 
     fn loaded_files<const N: usize>(files: [LoadedAskFile; N]) -> LoadedAskFiles {
