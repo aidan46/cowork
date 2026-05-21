@@ -5,40 +5,61 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
+/// HTTP connect timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// HTTP request timeout.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+/// Tiny doctor probe prompt.
 const DOCTOR_PROMPT: &str = r#"Return strict JSON only with exact shape {"ok":true}."#;
 
 #[derive(Debug, PartialEq, Eq)]
+/// Doctor probe error kind.
 pub(crate) enum DoctorProbeErrorKind {
+    /// Host URL invalid.
     BadHost,
+    /// Host not reachable.
     UnreachableHost,
+    /// Probe request failed.
     ProbeRequestFailed,
+    /// Probe JSON invalid.
     InvalidProbeJson,
 }
 
 #[derive(Debug, PartialEq, Eq)]
+/// Doctor probe error payload.
 pub(crate) struct DoctorProbeError {
+    /// Error kind.
     pub(crate) kind: DoctorProbeErrorKind,
+    /// Error message.
     pub(crate) message: String,
 }
 
 #[derive(Serialize)]
+/// Ollama generate request body.
 struct GenerateRequest<'a> {
+    /// Model name.
     model: &'a str,
+    /// Prompt text.
     prompt: &'a str,
+    /// Stream flag.
     stream: bool,
+    /// Output format.
     format: &'a str,
+    /// Generate options.
     options: GenerateOptions,
 }
 
 #[derive(Serialize)]
+/// Ollama generate options.
 struct GenerateOptions {
+    /// Sampling temperature.
     temperature: u8,
 }
 
 #[derive(Deserialize)]
+/// Ollama generate response envelope.
 struct GenerateResponse {
+    /// Raw model response text.
     response: String,
 }
 
@@ -88,12 +109,14 @@ pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<
         })
 }
 
+/// Validate generate host URL.
 pub(crate) fn validate_generate_host(host: &str) -> Result<(), DoctorProbeError> {
     build_generate_url(host)
         .map(|_| ())
         .map_err(DoctorProbeError::bad_host)
 }
 
+/// Send doctor probe request.
 pub(crate) fn request_doctor_probe(host: &str, model: &str) -> Result<String, DoctorProbeError> {
     let client = Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -149,6 +172,7 @@ pub(crate) fn request_doctor_probe(host: &str, model: &str) -> Result<String, Do
 }
 
 impl DoctorProbeError {
+    /// Build bad-host error.
     fn bad_host(message: impl Into<String>) -> Self {
         Self {
             kind: DoctorProbeErrorKind::BadHost,
@@ -156,6 +180,7 @@ impl DoctorProbeError {
         }
     }
 
+    /// Build unreachable-host error.
     fn unreachable_host(message: impl Into<String>) -> Self {
         Self {
             kind: DoctorProbeErrorKind::UnreachableHost,
@@ -163,6 +188,7 @@ impl DoctorProbeError {
         }
     }
 
+    /// Build probe-request error.
     fn probe_request_failed(message: impl Into<String>) -> Self {
         Self {
             kind: DoctorProbeErrorKind::ProbeRequestFailed,
@@ -170,6 +196,7 @@ impl DoctorProbeError {
         }
     }
 
+    /// Build invalid-probe-json error.
     fn invalid_probe_json(message: impl Into<String>) -> Self {
         Self {
             kind: DoctorProbeErrorKind::InvalidProbeJson,
@@ -178,6 +205,7 @@ impl DoctorProbeError {
     }
 }
 
+/// Build `/api/generate` URL.
 fn build_generate_url(host: &str) -> Result<Url, String> {
     let mut base = host.trim().to_string();
     if !base.ends_with('/') {
@@ -191,6 +219,7 @@ fn build_generate_url(host: &str) -> Result<Url, String> {
         .map_err(|error| format!("failed to build `/api/generate` URL from `{host}`: {error}"))
 }
 
+/// Flatten reqwest error chain.
 fn format_reqwest_error(prefix: &str, error: &reqwest::Error) -> String {
     let mut message = format!("{prefix}: {error}");
     let mut source = error.source();

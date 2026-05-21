@@ -1,6 +1,7 @@
 use super::{CLAUDE_INIT_RULES, CODEX_INIT_RULES};
 
 #[must_use]
+/// Return init rules for agent.
 pub(crate) fn render_init_rules(agent: &str) -> &'static str {
     match agent {
         "codex" => CODEX_INIT_RULES,
@@ -10,6 +11,7 @@ pub(crate) fn render_init_rules(agent: &str) -> &'static str {
 }
 
 #[must_use]
+/// Return target file for agent init.
 pub(crate) fn init_target_file(agent: &str) -> &'static str {
     match agent {
         "codex" => "AGENTS.md",
@@ -19,12 +21,14 @@ pub(crate) fn init_target_file(agent: &str) -> &'static str {
 }
 
 #[must_use]
+/// Render managed init block.
 pub(crate) fn render_init_managed_block(agent: &str) -> String {
     let (start, end) = init_block_markers(agent);
 
     format!("{start}\n{}{end}\n", render_init_rules(agent))
 }
 
+/// Replace or append managed init block.
 pub(crate) fn update_init_managed_block(
     agent: &str,
     current: &str,
@@ -69,6 +73,7 @@ pub(crate) fn update_init_managed_block(
 }
 
 #[must_use]
+/// Build init block markers.
 fn init_block_markers(agent: &str) -> (String, String) {
     (
         format!("<!-- cowork:init:start agent={agent} -->"),

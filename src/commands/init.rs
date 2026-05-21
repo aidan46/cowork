@@ -6,6 +6,7 @@ use crate::{
     output::{init_target_file, render_init_rules, update_init_managed_block},
 };
 
+/// Run `init`.
 pub(super) fn run_init(args: InitArgs) -> Result<ExitCode, AppError> {
     let (agent, mode) = match args.agent {
         InitAgent::Codex(mode) => ("codex", mode),

@@ -3,15 +3,21 @@ use serde::{Deserialize, Serialize};
 use super::{DOCTOR_COMMAND, SCHEMA_VERSION, STATUS_ERROR, STATUS_OK};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
+/// Doctor command output.
 pub(crate) struct DoctorOutput {
+    /// JSON schema version.
     schema_version: &'static str,
+    /// Command tag.
     command: &'static str,
+    /// Output status.
     status: &'static str,
+    /// Check list.
     checks: Vec<DoctorCheck>,
 }
 
 impl DoctorOutput {
     #[must_use]
+    /// Build success output.
     pub(crate) fn ok(checks: Vec<DoctorCheck>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
@@ -22,6 +28,7 @@ impl DoctorOutput {
     }
 
     #[must_use]
+    /// Build error output.
     pub(crate) fn error(checks: Vec<DoctorCheck>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
@@ -32,22 +39,29 @@ impl DoctorOutput {
     }
 
     #[must_use]
+    /// Serialize output to JSON.
     pub(crate) fn to_json(&self) -> String {
         serde_json::to_string(self).expect("doctor output should serialize")
     }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
+/// One doctor check row.
 pub(crate) struct DoctorCheck {
+    /// Check name.
     name: &'static str,
+    /// Check status.
     status: DoctorCheckStatus,
+    /// Check message.
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional fix hint.
     hint: Option<String>,
 }
 
 impl DoctorCheck {
     #[must_use]
+    /// Build success check.
     pub(crate) fn ok(name: &'static str, message: impl Into<String>) -> Self {
         Self {
             name,
@@ -58,6 +72,7 @@ impl DoctorCheck {
     }
 
     #[must_use]
+    /// Build error check.
     pub(crate) fn error(
         name: &'static str,
         message: impl Into<String>,
@@ -72,6 +87,7 @@ impl DoctorCheck {
     }
 
     #[must_use]
+    /// Build skipped check.
     pub(crate) fn skipped(name: &'static str, message: impl Into<String>) -> Self {
         Self {
             name,
@@ -84,17 +100,24 @@ impl DoctorCheck {
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Doctor check state.
 enum DoctorCheckStatus {
+    /// Check passed.
     Ok,
+    /// Check failed.
     Error,
+    /// Check skipped.
     Skipped,
 }
 
 #[derive(Debug, Deserialize)]
+/// Raw doctor probe JSON.
 struct RawDoctorProbe {
+    /// Probe success flag.
     ok: bool,
 }
 
+/// Parse doctor probe JSON.
 pub(crate) fn parse_doctor_probe(raw_json: &str) -> Result<(), String> {
     let probe = serde_json::from_str::<RawDoctorProbe>(raw_json)
         .map_err(|error| format!("failed to parse doctor probe JSON: {error}"))?;

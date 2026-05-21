@@ -9,6 +9,7 @@ use crate::{
     prompt::render_ask_prompt,
 };
 
+/// Run `ask` and print JSON.
 pub(super) fn run_ask(args: AskArgs) -> Result<ExitCode, AppError> {
     let ask_json = run_ask_json(args)?;
     println!("{ask_json}");
@@ -16,6 +17,7 @@ pub(super) fn run_ask(args: AskArgs) -> Result<ExitCode, AppError> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Run `ask` in cwd and return JSON.
 fn run_ask_json(args: AskArgs) -> Result<String, AppError> {
     let project_dir = env::current_dir().map_err(|error| {
         AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
@@ -25,6 +27,7 @@ fn run_ask_json(args: AskArgs) -> Result<String, AppError> {
     run_ask_json_in(args, &project_dir, home_dir.as_deref())
 }
 
+/// Run `ask` with explicit dirs.
 pub(crate) fn run_ask_json_in(
     args: AskArgs,
     project_dir: &Path,

@@ -4,9 +4,13 @@ use clap::{Parser, error::ErrorKind};
 
 use crate::{Cli, Command, error::AppError};
 
+/// Ask command run flow.
 mod ask;
+/// Doctor command run flow.
 mod doctor;
+/// Init command run flow.
 mod init;
+/// Locate command run flow.
 mod locate;
 
 #[cfg(test)]
@@ -24,6 +28,7 @@ pub fn run() -> ExitCode {
     }
 }
 
+/// Dispatch parsed subcommand.
 fn try_run() -> Result<ExitCode, AppError> {
     let cli = parse_cli()?;
 
@@ -35,6 +40,7 @@ fn try_run() -> Result<ExitCode, AppError> {
     }
 }
 
+/// Parse CLI args or map parse errors.
 fn parse_cli() -> Result<Cli, AppError> {
     Cli::try_parse().map_err(|error| match error.kind() {
         ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => error.exit(),

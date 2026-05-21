@@ -1,16 +1,29 @@
+/// Ask output parse.
 mod ask;
+/// Doctor output parse.
 mod doctor;
+/// Init text render.
 mod init;
+/// Locate output parse.
 mod locate;
 
+/// Shared schema version.
 const SCHEMA_VERSION: &str = "1.0";
+/// `ask` command tag.
 const ASK_COMMAND: &str = "ask";
+/// CLI command tag.
 const CLI_COMMAND: &str = "cli";
+/// `doctor` command tag.
 const DOCTOR_COMMAND: &str = "doctor";
+/// `init` command tag.
 const INIT_COMMAND: &str = "init";
+/// `locate` command tag.
 const LOCATE_COMMAND: &str = "locate";
+/// Success status tag.
 const STATUS_OK: &str = "ok";
+/// Error status tag.
 const STATUS_ERROR: &str = "error";
+/// Codex init rules block.
 const CODEX_INIT_RULES: &str = r#"# cowork rules for Codex
 
 - Use `cowork ask` before reading more than 3 files or any large file.
@@ -21,6 +34,7 @@ const CODEX_INIT_RULES: &str = r#"# cowork rules for Codex
 - Inspect `next_reads` yourself before acting.
 - Treat local model output as lead, not authority.
 "#;
+/// Claude init rules block.
 const CLAUDE_INIT_RULES: &str = r#"# cowork rules for Claude
 
 - Use `cowork ask` before reading more than 3 files or any large file.
@@ -38,11 +52,13 @@ pub(crate) use init::{init_target_file, render_init_rules, update_init_managed_b
 pub(crate) use locate::parse_locate_output;
 
 #[must_use]
+/// Return CLI command tag.
 pub(crate) fn cli_command() -> &'static str {
     CLI_COMMAND
 }
 
 #[must_use]
+/// Return init command tag.
 pub(crate) fn init_command() -> &'static str {
     INIT_COMMAND
 }

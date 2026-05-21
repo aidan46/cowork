@@ -8,6 +8,7 @@ use crate::{
     output::{DoctorCheck, DoctorOutput},
 };
 
+/// Run `doctor` and print JSON.
 pub(super) fn run_doctor(args: DoctorArgs) -> Result<ExitCode, AppError> {
     let result = run_doctor_json(args)?;
     println!("{}", result.json);
@@ -15,6 +16,7 @@ pub(super) fn run_doctor(args: DoctorArgs) -> Result<ExitCode, AppError> {
     Ok(result.exit_code)
 }
 
+/// Run `doctor` in cwd and return JSON result.
 fn run_doctor_json(args: DoctorArgs) -> Result<DoctorRunResult, AppError> {
     let project_dir = env::current_dir().map_err(|error| {
         AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
@@ -24,6 +26,7 @@ fn run_doctor_json(args: DoctorArgs) -> Result<DoctorRunResult, AppError> {
     Ok(run_doctor_json_in(args, &project_dir, home_dir.as_deref()))
 }
 
+/// Run `doctor` with explicit dirs.
 fn run_doctor_json_in(
     args: DoctorArgs,
     project_dir: &Path,
@@ -148,6 +151,7 @@ fn run_doctor_json_in(
     DoctorRunResult::ok(checks)
 }
 
+/// Map probe error into checks and exit.
 fn doctor_probe_error_result(
     mut checks: Vec<DoctorCheck>,
     error: model::DoctorProbeError,
@@ -218,6 +222,7 @@ fn doctor_probe_error_result(
     }
 }
 
+/// Push skipped doctor checks.
 fn push_skipped_doctor_checks(
     checks: &mut Vec<DoctorCheck>,
     message: &str,
@@ -231,6 +236,7 @@ fn push_skipped_doctor_checks(
     );
 }
 
+/// Format loaded config summary.
 fn format_loaded_config_message(loaded_files: &[std::path::PathBuf]) -> String {
     match loaded_files {
         [] => "Loaded 0 config files, using built-in defaults.".to_string(),
@@ -247,12 +253,16 @@ fn format_loaded_config_message(loaded_files: &[std::path::PathBuf]) -> String {
     }
 }
 
+/// Doctor JSON plus exit code.
 struct DoctorRunResult {
+    /// Serialized JSON output.
     json: String,
+    /// Exit code to return.
     exit_code: ExitCode,
 }
 
 impl DoctorRunResult {
+    /// Build success result.
     fn ok(checks: Vec<DoctorCheck>) -> Self {
         Self {
             json: DoctorOutput::ok(checks).to_json(),
@@ -260,6 +270,7 @@ impl DoctorRunResult {
         }
     }
 
+    /// Build error result.
     fn error(checks: Vec<DoctorCheck>, exit: DoctorExit) -> Self {
         Self {
             json: DoctorOutput::error(checks).to_json(),

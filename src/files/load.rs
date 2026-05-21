@@ -6,18 +6,26 @@ use std::{
 use crate::error::AppError;
 
 #[derive(Debug, PartialEq, Eq)]
+/// One loaded ask file.
 pub(crate) struct LoadedAskFile {
+    /// Source path.
     pub(crate) path: PathBuf,
+    /// UTF-8 file content.
     pub(crate) content: String,
+    /// Content byte count.
     pub(crate) bytes: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
+/// Loaded ask file set.
 pub(crate) struct LoadedAskFiles {
+    /// Loaded files in input order.
     pub(crate) files: Vec<LoadedAskFile>,
+    /// Total byte count.
     pub(crate) total_bytes: usize,
 }
 
+/// Load ask files and total bytes.
 pub(crate) fn load_ask_files(
     paths: &[PathBuf],
     max_bytes: Option<usize>,
@@ -43,6 +51,7 @@ pub(crate) fn load_ask_files(
     Ok(LoadedAskFiles { files, total_bytes })
 }
 
+/// Load one ask file when text.
 fn load_ask_file(path: &Path) -> Result<Option<LoadedAskFile>, AppError> {
     if path.is_symlink() || !path.is_file() {
         return Ok(None);
@@ -66,6 +75,7 @@ fn load_ask_file(path: &Path) -> Result<Option<LoadedAskFile>, AppError> {
     }))
 }
 
+/// Detect binary by NUL byte.
 fn is_binary_file(bytes: &[u8]) -> bool {
     bytes.contains(&0)
 }
