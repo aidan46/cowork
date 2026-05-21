@@ -11,16 +11,18 @@ mod model;
 mod output;
 mod prompt;
 
-use std::{env, path::Path, process::ExitCode};
+use std::{env, fs, io::ErrorKind as IoErrorKind, path::Path, process::ExitCode};
 
 use clap::{Parser, error::ErrorKind};
 
-pub use cli::{AskArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitPrintArgs};
+pub use cli::{AskArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitModeArgs};
 use config::resolve_ask_config;
 use error::{AppError, DoctorExit};
 use files::{collect_ask_candidates, load_ask_files};
 use model::DoctorProbeErrorKind;
-use output::{DoctorCheck, DoctorOutput, render_init_rules};
+use output::{
+    DoctorCheck, DoctorOutput, init_target_file, render_init_rules, update_init_managed_block,
+};
 use prompt::render_ask_prompt;
 
 /// Run `cowork`.
@@ -105,13 +107,27 @@ fn run_doctor(args: DoctorArgs) -> Result<ExitCode, AppError> {
 }
 
 fn run_init(args: InitArgs) -> Result<ExitCode, AppError> {
-    let rules = match args.agent {
-        InitAgent::Codex(mode) if mode.print => render_init_rules("codex"),
-        InitAgent::Claude(mode) if mode.print => render_init_rules("claude"),
-        _ => unreachable!("clap requires `--print`"),
+    let (agent, mode) = match args.agent {
+        InitAgent::Codex(mode) => ("codex", mode),
+        InitAgent::Claude(mode) => ("claude", mode),
     };
 
-    println!("{rules}");
+    if mode.print {
+        println!("{}", render_init_rules(agent));
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let target = Path::new(init_target_file(agent));
+    let current = match fs::read_to_string(target) {
+        Ok(content) => content,
+        Err(error) if error.kind() == IoErrorKind::NotFound => String::new(),
+        Err(error) => return Err(AppError::init_file_update(target, error.to_string())),
+    };
+    let next = update_init_managed_block(agent, &current)
+        .map_err(|message| AppError::init_file_update(target, message))?;
+
+    fs::write(target, next)
+        .map_err(|error| AppError::init_file_update(target, error.to_string()))?;
 
     Ok(ExitCode::SUCCESS)
 }

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueHint};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueHint};
 
 /// Parsed `cowork` args.
 #[derive(Debug, Parser)]
@@ -89,18 +89,23 @@ pub struct InitArgs {
 /// Agent targets for `cowork init`.
 #[derive(Debug, Subcommand)]
 pub enum InitAgent {
-    /// Print rules for Codex.
-    Codex(InitPrintArgs),
-    /// Print rules for Claude.
-    Claude(InitPrintArgs),
+    /// Print or write rules for Codex.
+    Codex(InitModeArgs),
+    /// Print or write rules for Claude.
+    Claude(InitModeArgs),
 }
 
-/// Print mode for `cowork init`.
+/// Mode for `cowork init`.
 #[derive(Clone, Copy, Debug, Args)]
-pub struct InitPrintArgs {
+#[command(group(ArgGroup::new("init_mode").required(true).args(["print", "write"])))]
+pub struct InitModeArgs {
     /// Print rules only.
-    #[arg(long, required = true)]
+    #[arg(long)]
     pub print: bool,
+
+    /// Write managed block to target file.
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[cfg(test)]
@@ -196,7 +201,27 @@ mod tests {
 
         match cli.command {
             Command::Init(args) => match args.agent {
-                InitAgent::Codex(mode) => assert!(mode.print),
+                InitAgent::Codex(mode) => {
+                    assert!(mode.print);
+                    assert!(!mode.write);
+                }
+                InitAgent::Claude(_) => panic!("expected codex init target"),
+            },
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn init_codex_parses_write_flag() {
+        let cli = Cli::try_parse_from(["cowork", "init", "codex", "--write"])
+            .expect("init args should parse");
+
+        match cli.command {
+            Command::Init(args) => match args.agent {
+                InitAgent::Codex(mode) => {
+                    assert!(!mode.print);
+                    assert!(mode.write);
+                }
                 InitAgent::Claude(_) => panic!("expected codex init target"),
             },
             _ => panic!("expected init command"),
@@ -221,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn init_codex_help_shows_print_flag() {
+    fn init_codex_help_shows_mode_flags() {
         let mut command = Cli::command();
         let init = command
             .find_subcommand_mut("init")
@@ -238,5 +263,6 @@ mod tests {
         let help = String::from_utf8(help).expect("help should be utf-8");
 
         assert!(help.contains("--print"));
+        assert!(help.contains("--write"));
     }
 }

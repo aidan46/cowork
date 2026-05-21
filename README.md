@@ -39,11 +39,18 @@ Run from repo root:
 cargo run -- doctor --model your-model
 ```
 
-Print agent rules next, no file writes yet:
+Print agent rules:
 
 ```bash
 cargo run -- init codex --print
 cargo run -- init claude --print
+```
+
+Write managed agent blocks:
+
+```bash
+cargo run -- init codex --write
+cargo run -- init claude --write
 ```
 
 If `doctor` passes, ask next:
@@ -127,7 +134,8 @@ Example success shape:
 ## Scope today
 
 - three subcommands: `doctor`, `ask`, `init`
-- `init --print` prints short agent rules, no write mode yet
+- `init --print` prints short agent rules
+- `init --write` writes bounded managed blocks to `AGENTS.md` or `CLAUDE.md`
 - JSON stdout only, even on errors
 - one Ollama-style model client
 - no cache, daemon, or index layer
