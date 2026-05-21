@@ -71,7 +71,7 @@ git config core.hooksPath .githooks
 
 Checks:
 
-- `pre-commit`: `taplo fmt --check Cargo.toml taplo.toml`, `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`
+- `pre-commit`: reject staged ignored paths, `taplo fmt --check Cargo.toml taplo.toml`, `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`
 - `pre-push`: `taplo fmt --check Cargo.toml taplo.toml`, `cargo nextest run`, `cargo doc --no-deps --quiet`
 
 Manual run:
