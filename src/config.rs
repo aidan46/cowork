@@ -22,14 +22,19 @@ pub struct ResolvedAskConfig {
 }
 
 #[derive(Debug, Default, Deserialize)]
+/// Raw file config.
 struct FileConfig {
     #[serde(default)]
+    /// Ask config block.
     ask: AskConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
+/// Raw ask config.
 struct AskConfig {
+    /// Optional model override.
     model: Option<String>,
+    /// Optional host override.
     host: Option<String>,
 }
 
@@ -60,6 +65,7 @@ pub fn resolve_ask_config(
     })
 }
 
+/// Load one optional ask config file.
 fn load_optional_ask_config(
     path: &Path,
     loaded_files: &mut Vec<PathBuf>,

@@ -2,7 +2,9 @@ use std::fmt::Write as _;
 
 use crate::files::{LoadedAskFile, LoadedAskFiles};
 
+/// Prompt role line.
 const ROLE_LINE: &str = "You are local coding coworker helping another coding agent inspect files.";
+/// Shared hard rules.
 const HARD_RULES: [&str; 7] = [
     "Use only provided files.",
     "Return valid JSON only.",
@@ -12,6 +14,7 @@ const HARD_RULES: [&str; 7] = [
     "Do not speculate beyond provided files.",
     "Keep next_reads inside provided paths or obvious adjacent files only.",
 ];
+/// Ask schema block.
 const ASK_SCHEMA_BLOCK: &str = concat!(
     "schema_version:string\n",
     "command:\"ask\"\n",
@@ -25,6 +28,7 @@ const ASK_SCHEMA_BLOCK: &str = concat!(
     "next_reads:[{path:string,reason:string}]\n",
     "metadata:{input_bytes:number,duration_ms:number}"
 );
+/// Locate schema block.
 const LOCATE_SCHEMA_BLOCK: &str = concat!(
     "schema_version:string\n",
     "command:\"locate\"\n",
@@ -34,6 +38,7 @@ const LOCATE_SCHEMA_BLOCK: &str = concat!(
     "risks:[{kind:\"missing_context\"|\"model_uncertainty\"|\"parse_error\"|\"skipped_file\"|\"unsupported_file\"|\"unknown\",message:string}]"
 );
 
+/// Render ask prompt text.
 pub(crate) fn render_ask_prompt(question: &str, loaded_files: &LoadedAskFiles) -> String {
     let mut prompt = String::new();
 
@@ -63,6 +68,7 @@ pub(crate) fn render_ask_prompt(question: &str, loaded_files: &LoadedAskFiles) -
     prompt
 }
 
+/// Render locate prompt text.
 pub(crate) fn render_locate_prompt(thing: &str, loaded_files: &LoadedAskFiles) -> String {
     let mut prompt = String::new();
 
@@ -93,6 +99,7 @@ pub(crate) fn render_locate_prompt(thing: &str, loaded_files: &LoadedAskFiles) -
     prompt
 }
 
+/// Append one file block.
 fn render_file_block(prompt: &mut String, file: &LoadedAskFile) {
     writeln!(prompt, "<file path=\"{}\">", file.path.display()).expect("write to string");
     prompt.push_str(&file.content);

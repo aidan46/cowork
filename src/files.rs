@@ -1,4 +1,6 @@
+/// Candidate discovery.
 mod discovery;
+/// File load helpers.
 mod load;
 
 pub use discovery::collect_ask_candidates;

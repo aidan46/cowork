@@ -13,6 +13,7 @@ missing_docs = "deny"
 [lints.clippy]
 dbg_macro = "deny"
 doc_markdown = "deny"
+missing_docs_in_private_items = "deny"
 missing_errors_doc = "deny"
 missing_panics_doc = "deny"
 must_use_candidate = "deny"

@@ -9,6 +9,7 @@ use crate::{
     prompt::render_locate_prompt,
 };
 
+/// Run `locate` and print JSON.
 pub(super) fn run_locate(args: LocateArgs) -> Result<ExitCode, AppError> {
     let locate_json = run_locate_json(args)?;
     println!("{locate_json}");
@@ -16,6 +17,7 @@ pub(super) fn run_locate(args: LocateArgs) -> Result<ExitCode, AppError> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Run `locate` in cwd and return JSON.
 fn run_locate_json(args: LocateArgs) -> Result<String, AppError> {
     let project_dir = env::current_dir().map_err(|error| {
         AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
@@ -25,6 +27,7 @@ fn run_locate_json(args: LocateArgs) -> Result<String, AppError> {
     run_locate_json_in(args, &project_dir, home_dir.as_deref())
 }
 
+/// Run `locate` with explicit dirs.
 fn run_locate_json_in(
     args: LocateArgs,
     project_dir: &Path,

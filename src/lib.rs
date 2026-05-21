@@ -4,12 +4,19 @@
 
 /// CLI types.
 pub mod cli;
+/// CLI run flow.
 mod commands;
+/// Config load and merge.
 mod config;
+/// Error types and exit codes.
 mod error;
+/// File discovery and load.
 mod files;
+/// Model request helpers.
 mod model;
+/// JSON output types.
 mod output;
+/// Model prompt render.
 mod prompt;
 
 pub use cli::{AskArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitModeArgs, LocateArgs};

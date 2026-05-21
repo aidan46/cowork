@@ -5,6 +5,7 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::error::AppError;
 
+/// Dirs skipped during recursive walk.
 const DEFAULT_EXCLUDED_DIRS: [&str; 8] = [
     ".git",
     "target",
@@ -16,6 +17,7 @@ const DEFAULT_EXCLUDED_DIRS: [&str; 8] = [
     "coverage",
 ];
 
+/// Validate ask paths before collect.
 pub(crate) fn validate_ask_paths(paths: &[PathBuf], recursive: bool) -> Result<(), AppError> {
     for path in paths {
         validate_path(path, recursive)?;
@@ -24,6 +26,7 @@ pub(crate) fn validate_ask_paths(paths: &[PathBuf], recursive: bool) -> Result<(
     Ok(())
 }
 
+/// Collect ask candidate files.
 pub fn collect_ask_candidates(
     paths: &[PathBuf],
     recursive: bool,
@@ -45,6 +48,7 @@ pub fn collect_ask_candidates(
     Ok(candidates)
 }
 
+/// Validate one path input.
 fn validate_path(path: &Path, recursive: bool) -> Result<(), AppError> {
     if !path.exists() {
         return Err(AppError::missing_path(path));
@@ -61,6 +65,7 @@ fn validate_path(path: &Path, recursive: bool) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Collect candidates from one path.
 fn collect_path_candidates(path: &Path, filters: &CandidateFilters, candidates: &mut Vec<PathBuf>) {
     if path.is_symlink() {
         return;
@@ -99,6 +104,7 @@ fn collect_path_candidates(path: &Path, filters: &CandidateFilters, candidates: 
     }
 }
 
+/// Decide if walk should prune dir.
 fn should_prune_dir(entry: &DirEntry) -> bool {
     if entry.depth() == 0 || !entry.file_type().is_dir() {
         return false;
@@ -111,12 +117,16 @@ fn should_prune_dir(entry: &DirEntry) -> bool {
     DEFAULT_EXCLUDED_DIRS.contains(&name)
 }
 
+/// Include and exclude matchers.
 struct CandidateFilters {
+    /// Include matcher set.
     include: Option<GlobSet>,
+    /// Exclude matcher set.
     exclude: Option<GlobSet>,
 }
 
 impl CandidateFilters {
+    /// Build filters from CLI globs.
     fn build(include: &[String], exclude: &[String]) -> Result<Self, AppError> {
         Ok(Self {
             include: compile_globs(include, "--include")?,
@@ -124,14 +134,17 @@ impl CandidateFilters {
         })
     }
 
+    /// Check explicit file match.
     fn matches_explicit_file(&self, path: &Path) -> bool {
         !self.is_excluded(path)
     }
 
+    /// Check discovered file match.
     fn matches_discovered_file(&self, path: &Path) -> bool {
         self.is_included(path) && !self.is_excluded(path)
     }
 
+    /// Check include rules.
     fn is_included(&self, path: &Path) -> bool {
         match &self.include {
             Some(include) => matches_glob(include, path),
@@ -139,6 +152,7 @@ impl CandidateFilters {
         }
     }
 
+    /// Check exclude rules.
     fn is_excluded(&self, path: &Path) -> bool {
         match &self.exclude {
             Some(exclude) => matches_glob(exclude, path),
@@ -147,6 +161,7 @@ impl CandidateFilters {
     }
 }
 
+/// Compile glob list into matcher.
 fn compile_globs(globs: &[String], flag: &str) -> Result<Option<GlobSet>, AppError> {
     if globs.is_empty() {
         return Ok(None);
@@ -166,6 +181,7 @@ fn compile_globs(globs: &[String], flag: &str) -> Result<Option<GlobSet>, AppErr
         .map_err(|error| AppError::invalid_arguments(format!("invalid {flag} globs: {error}")))
 }
 
+/// Match glob set on path or file name.
 fn matches_glob(globs: &GlobSet, path: &Path) -> bool {
     globs.is_match(path)
         || path

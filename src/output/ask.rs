@@ -5,40 +5,63 @@ use crate::error::AppError;
 use super::{ASK_COMMAND, SCHEMA_VERSION, STATUS_OK};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
+/// Ask command output.
 pub(crate) struct AskOutput {
+    /// JSON schema version.
     schema_version: &'static str,
+    /// Command tag.
     command: &'static str,
+    /// Output status.
     status: &'static str,
+    /// Asked question.
     question: String,
+    /// Answer body.
     answer: AskAnswer,
+    /// File evidence list.
     files: Vec<AskFile>,
+    /// Symbol evidence list.
     symbols: Vec<AskSymbol>,
+    /// Evidence notes.
     evidence: Vec<AskEvidence>,
+    /// Risk list.
     risks: Vec<AskRisk>,
+    /// Suggested next reads.
     next_reads: Vec<AskNextRead>,
+    /// Output metadata.
     metadata: AskMetadata,
 }
 
 impl AskOutput {
     #[must_use]
+    /// Serialize output to JSON.
     pub(crate) fn to_json(&self) -> String {
         serde_json::to_string(self).expect("ask output should serialize")
     }
 }
 
 #[derive(Debug, Deserialize)]
+/// Raw ask output from model.
 struct RawAskOutput {
+    /// Asked question.
     question: String,
+    /// Answer body.
     answer: AskAnswer,
+    /// File evidence list.
     files: Vec<AskFile>,
+    /// Symbol evidence list.
     symbols: Vec<AskSymbol>,
+    /// Evidence notes.
     evidence: Vec<AskEvidence>,
+    /// Risk list.
     risks: Vec<AskRisk>,
+    /// Suggested next reads.
     next_reads: Vec<AskNextRead>,
+    /// Output metadata.
     metadata: AskMetadata,
 }
 
 impl From<RawAskOutput> for AskOutput {
+    /// Add fixed top-level fields.
     fn from(value: RawAskOutput) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
@@ -57,89 +80,141 @@ impl From<RawAskOutput> for AskOutput {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// Ask answer body.
 pub(crate) struct AskAnswer {
+    /// Short answer text.
     summary: String,
+    /// Answer confidence.
     confidence: AskConfidence,
+    /// True when evidence missing.
     not_found: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// One file evidence row.
 struct AskFile {
+    /// File path.
     path: String,
+    /// True when file was included.
     included: bool,
+    /// Inclusion reason.
     reason: String,
+    /// File byte count.
     bytes: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// One symbol evidence row.
 struct AskSymbol {
+    /// Symbol name.
     name: String,
+    /// Symbol kind.
     kind: AskSymbolKind,
+    /// Source path.
     path: String,
+    /// Relevance note.
     relevance: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// One evidence note.
 struct AskEvidence {
+    /// Source path.
     path: String,
+    /// Source symbol.
     symbol: String,
+    /// Evidence note.
     note: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// One risk row.
 struct AskRisk {
+    /// Risk kind.
     kind: AskRiskKind,
+    /// Risk message.
     message: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// One next-read row.
 struct AskNextRead {
+    /// File path.
     path: String,
+    /// Read reason.
     reason: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// Ask output metadata.
 struct AskMetadata {
+    /// Input byte count.
     input_bytes: usize,
+    /// Model time in ms.
     duration_ms: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Ask confidence level.
 enum AskConfidence {
+    /// High confidence.
     High,
+    /// Medium confidence.
     Medium,
+    /// Low confidence.
     Low,
+    /// Unknown confidence.
     Unknown,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Ask symbol kind.
 enum AskSymbolKind {
+    /// Function symbol.
     Function,
+    /// Type symbol.
     Type,
+    /// Trait symbol.
     Trait,
+    /// Impl block.
     Impl,
+    /// Module symbol.
     Module,
+    /// Constant symbol.
     Constant,
+    /// Variable symbol.
     Variable,
+    /// Route symbol.
     Route,
+    /// Component symbol.
     Component,
+    /// Test symbol.
     Test,
+    /// Unknown symbol kind.
     Unknown,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Ask risk kind.
 enum AskRiskKind {
+    /// Missing context risk.
     MissingContext,
+    /// Model uncertainty risk.
     ModelUncertainty,
+    /// Parse error risk.
     ParseError,
+    /// Skipped file risk.
     SkippedFile,
+    /// Unsupported file risk.
     UnsupportedFile,
+    /// Unknown risk.
     Unknown,
 }
 
+/// Parse ask output JSON.
 pub(crate) fn parse_ask_output(raw_json: &str) -> Result<AskOutput, AppError> {
     serde_json::from_str::<RawAskOutput>(raw_json)
         .map(AskOutput::from)

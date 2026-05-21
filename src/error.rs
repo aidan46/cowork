@@ -6,41 +6,86 @@ use thiserror::Error;
 use crate::output::{cli_command, init_command};
 
 #[derive(Debug, Error)]
+/// App error surface.
 pub enum AppError {
     #[error("{message}")]
-    InvalidArguments { message: String },
+    /// Invalid CLI or config input.
+    InvalidArguments {
+        /// Error message.
+        message: String,
+    },
     #[error("path does not exist: {path}")]
-    MissingPath { path: String },
+    /// Input path missing.
+    MissingPath {
+        /// Missing path text.
+        path: String,
+    },
     #[error("`--recursive` required for directory path: {path}")]
-    DirectoryRequiresRecursive { path: String },
+    /// Dir input needs `--recursive`.
+    DirectoryRequiresRecursive {
+        /// Dir path text.
+        path: String,
+    },
     #[error("failed to read file: {path}: {message}")]
-    FileRead { path: String, message: String },
+    /// File read failed.
+    FileRead {
+        /// File path text.
+        path: String,
+        /// IO error text.
+        message: String,
+    },
     #[error("failed to update init file: {path}: {message}")]
-    InitFileUpdate { path: String, message: String },
+    /// Init file update failed.
+    InitFileUpdate {
+        /// Target path text.
+        path: String,
+        /// Update error text.
+        message: String,
+    },
     #[error("input bytes exceed `--max-bytes`: {actual_bytes} > {max_bytes}")]
+    /// Loaded bytes exceed cap.
     MaxBytesExceeded {
+        /// Configured byte cap.
         max_bytes: usize,
+        /// Actual loaded bytes.
         actual_bytes: usize,
     },
     #[error("{message}")]
-    ModelRequestFailed { message: String },
+    /// Model request failed.
+    ModelRequestFailed {
+        /// Error message.
+        message: String,
+    },
     #[error("{message}")]
-    ResponseParseFailed { message: String },
+    /// Model JSON parse failed.
+    ResponseParseFailed {
+        /// Error message.
+        message: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `doctor` exit buckets.
 pub enum DoctorExit {
+    /// Doctor checks passed.
     Ok,
+    /// Config load failed.
     InvalidConfig,
+    /// Host URL invalid.
     BadHost,
+    /// Model missing.
     MissingModel,
+    /// Host not reachable.
     UnreachableHost,
+    /// Probe request failed.
     ProbeRequestFailed,
+    /// Probe JSON invalid.
     InvalidProbeJson,
 }
 
 impl AppError {
     #[must_use]
+    /// Build invalid-arguments error.
     pub fn invalid_arguments(message: impl Into<String>) -> Self {
         Self::InvalidArguments {
             message: message.into(),
@@ -48,6 +93,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Build missing-path error.
     pub fn missing_path(path: &Path) -> Self {
         Self::MissingPath {
             path: path.display().to_string(),
@@ -55,6 +101,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Build missing-recursive error.
     pub fn directory_requires_recursive(path: &Path) -> Self {
         Self::DirectoryRequiresRecursive {
             path: path.display().to_string(),
@@ -62,6 +109,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Build file-read error.
     pub fn file_read(path: &Path, error: &io::Error) -> Self {
         Self::FileRead {
             path: path.display().to_string(),
@@ -70,6 +118,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Build init-file-update error.
     pub fn init_file_update(path: &Path, message: impl Into<String>) -> Self {
         Self::InitFileUpdate {
             path: path.display().to_string(),
@@ -78,6 +127,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Build max-bytes error.
     pub fn max_bytes_exceeded(max_bytes: usize, actual_bytes: usize) -> Self {
         Self::MaxBytesExceeded {
             max_bytes,
@@ -86,6 +136,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Build model-request error.
     pub fn model_request_failed(message: impl Into<String>) -> Self {
         Self::ModelRequestFailed {
             message: message.into(),
@@ -93,6 +144,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Build response-parse error.
     pub fn response_parse_failed(message: impl Into<String>) -> Self {
         Self::ResponseParseFailed {
             message: message.into(),
@@ -100,6 +152,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Return process exit code.
     pub fn exit_code(&self) -> ExitCode {
         match self {
             Self::InvalidArguments { .. } => ExitCode::from(1),
@@ -114,11 +167,13 @@ impl AppError {
     }
 
     #[must_use]
+    /// Serialize JSON error output.
     pub fn to_json(&self) -> String {
         serde_json::to_string(&ErrorResponse::from(self)).expect("error response should serialize")
     }
 
     #[must_use]
+    /// Return stable error code.
     fn code(&self) -> &'static str {
         match self {
             Self::InvalidArguments { .. } => "INVALID_ARGUMENTS",
@@ -133,6 +188,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Return command tag for error.
     fn command(&self) -> &'static str {
         match self {
             Self::InvalidArguments { .. } => cli_command(),
@@ -147,6 +203,7 @@ impl AppError {
     }
 
     #[must_use]
+    /// Return optional fix hint.
     fn hint(&self) -> Option<&'static str> {
         match self {
             Self::InvalidArguments { .. } => Some("Use `cowork --help`."),
@@ -167,6 +224,7 @@ impl AppError {
 
 impl DoctorExit {
     #[must_use]
+    /// Return doctor exit code.
     pub fn exit_code(self) -> ExitCode {
         match self {
             Self::Ok => ExitCode::SUCCESS,
@@ -181,22 +239,32 @@ impl DoctorExit {
 }
 
 #[derive(Debug, Serialize)]
+/// Serialized error envelope.
 struct ErrorResponse<'a> {
+    /// JSON schema version.
     schema_version: &'a str,
+    /// Command tag.
     command: &'a str,
+    /// Output status.
     status: &'a str,
+    /// Error body.
     error: ErrorBody<'a>,
 }
 
 #[derive(Debug, Serialize)]
+/// Serialized error body.
 struct ErrorBody<'a> {
+    /// Stable error code.
     code: &'a str,
+    /// Human error text.
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional fix hint.
     hint: Option<&'a str>,
 }
 
 impl<'a> From<&'a AppError> for ErrorResponse<'a> {
+    /// Convert app error into JSON envelope.
     fn from(error: &'a AppError) -> Self {
         Self {
             schema_version: "1.0",
