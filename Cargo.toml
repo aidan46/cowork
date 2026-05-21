@@ -1,8 +1,9 @@
 [package]
 name = "cowork"
 version = "0.1.0"
-description = "Local CLI for coding agents, narrow repo answers in deterministic JSON."
+description = "Local CLI for coding agents."
 edition = "2024"
+license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/aidan46/cowork"
 
