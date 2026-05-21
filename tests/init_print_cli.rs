@@ -1,4 +1,8 @@
 //! CLI tests for `cowork init --print`.
+#![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+#![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+#![allow(clippy::expect_used, reason = "integration test helpers stay direct")]
+#![allow(clippy::unwrap_used, reason = "integration test helpers stay direct")]
 
 use std::{
     fs,

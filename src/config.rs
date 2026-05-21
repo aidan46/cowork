@@ -39,6 +39,10 @@ struct AskConfig {
 }
 
 /// Resolve `ask` config from user config, project config, then CLI.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when a config file cannot be read or parsed.
 pub fn resolve_ask_config(
     project_dir: &Path,
     home_dir: Option<&Path>,
@@ -66,6 +70,10 @@ pub fn resolve_ask_config(
 }
 
 /// Load one optional ask config file.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when the config file cannot be read or parsed.
 fn load_optional_ask_config(
     path: &Path,
     loaded_files: &mut Vec<PathBuf>,
@@ -93,6 +101,9 @@ fn load_optional_ask_config(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use std::{
         fs,
         path::{Path, PathBuf},

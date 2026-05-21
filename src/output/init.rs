@@ -2,6 +2,10 @@ use super::{CLAUDE_INIT_RULES, CODEX_INIT_RULES};
 
 #[must_use]
 /// Return init rules for agent.
+///
+/// # Panics
+///
+/// Panics when `agent` is not a supported init target.
 pub(crate) fn render_init_rules(agent: &str) -> &'static str {
     match agent {
         "codex" => CODEX_INIT_RULES,
@@ -12,6 +16,10 @@ pub(crate) fn render_init_rules(agent: &str) -> &'static str {
 
 #[must_use]
 /// Return target file for agent init.
+///
+/// # Panics
+///
+/// Panics when `agent` is not a supported init target.
 pub(crate) fn init_target_file(agent: &str) -> &'static str {
     match agent {
         "codex" => "AGENTS.md",
@@ -22,6 +30,10 @@ pub(crate) fn init_target_file(agent: &str) -> &'static str {
 
 #[must_use]
 /// Render managed init block.
+///
+/// # Panics
+///
+/// Panics when `agent` is not a supported init target.
 pub(crate) fn render_init_managed_block(agent: &str) -> String {
     let (start, end) = init_block_markers(agent);
 
@@ -29,6 +41,10 @@ pub(crate) fn render_init_managed_block(agent: &str) -> String {
 }
 
 /// Replace or append managed init block.
+///
+/// # Errors
+///
+/// Returns an error when one managed marker exists without the other.
 pub(crate) fn update_init_managed_block(
     agent: &str,
     current: &str,
@@ -83,6 +99,9 @@ fn init_block_markers(agent: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use super::{render_init_managed_block, render_init_rules, update_init_managed_block};
 
     #[test]

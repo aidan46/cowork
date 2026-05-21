@@ -64,6 +64,10 @@ struct GenerateResponse {
 }
 
 /// Send one Ollama generate req, return raw model text.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on host, HTTP, or response JSON failure.
 pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<String, AppError> {
     let client = Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -110,6 +114,10 @@ pub(crate) fn request_generate(host: &str, model: &str, prompt: &str) -> Result<
 }
 
 /// Validate generate host URL.
+///
+/// # Errors
+///
+/// Returns [`DoctorProbeError`] when the host URL is invalid.
 pub(crate) fn validate_generate_host(host: &str) -> Result<(), DoctorProbeError> {
     build_generate_url(host)
         .map(|_| ())
@@ -117,6 +125,10 @@ pub(crate) fn validate_generate_host(host: &str) -> Result<(), DoctorProbeError>
 }
 
 /// Send doctor probe request.
+///
+/// # Errors
+///
+/// Returns [`DoctorProbeError`] on host, HTTP, or response JSON failure.
 pub(crate) fn request_doctor_probe(host: &str, model: &str) -> Result<String, DoctorProbeError> {
     let client = Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -206,6 +218,10 @@ impl DoctorProbeError {
 }
 
 /// Build `/api/generate` URL.
+///
+/// # Errors
+///
+/// Returns a string error when the host URL cannot be parsed or joined.
 fn build_generate_url(host: &str) -> Result<Url, String> {
     let mut base = host.trim().to_string();
     if !base.ends_with('/') {
@@ -235,6 +251,9 @@ fn format_reqwest_error(prefix: &str, error: &reqwest::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use std::{
         io::{Read, Write},
         net::{TcpListener, TcpStream},

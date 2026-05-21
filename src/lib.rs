@@ -27,6 +27,9 @@ pub(crate) use commands::run_ask_json_in;
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use std::{
         fs,
         io::{Read, Write},

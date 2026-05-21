@@ -18,6 +18,10 @@ const DEFAULT_EXCLUDED_DIRS: [&str; 8] = [
 ];
 
 /// Validate ask paths before collect.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when any input path is missing or needs `--recursive`.
 pub(crate) fn validate_ask_paths(paths: &[PathBuf], recursive: bool) -> Result<(), AppError> {
     for path in paths {
         validate_path(path, recursive)?;
@@ -27,6 +31,10 @@ pub(crate) fn validate_ask_paths(paths: &[PathBuf], recursive: bool) -> Result<(
 }
 
 /// Collect ask candidate files.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when input paths or glob filters are invalid.
 pub fn collect_ask_candidates(
     paths: &[PathBuf],
     recursive: bool,
@@ -49,6 +57,10 @@ pub fn collect_ask_candidates(
 }
 
 /// Validate one path input.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when the path is missing or a dir needs `--recursive`.
 fn validate_path(path: &Path, recursive: bool) -> Result<(), AppError> {
     if !path.exists() {
         return Err(AppError::missing_path(path));
@@ -127,6 +139,10 @@ struct CandidateFilters {
 
 impl CandidateFilters {
     /// Build filters from CLI globs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when include or exclude globs are invalid.
     fn build(include: &[String], exclude: &[String]) -> Result<Self, AppError> {
         Ok(Self {
             include: compile_globs(include, "--include")?,
@@ -162,6 +178,10 @@ impl CandidateFilters {
 }
 
 /// Compile glob list into matcher.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when a glob pattern or glob set is invalid.
 fn compile_globs(globs: &[String], flag: &str) -> Result<Option<GlobSet>, AppError> {
     if globs.is_empty() {
         return Ok(None);

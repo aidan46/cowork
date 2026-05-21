@@ -38,10 +38,17 @@ impl DoctorOutput {
         }
     }
 
-    #[must_use]
     /// Serialize output to JSON.
-    pub(crate) fn to_json(&self) -> String {
-        serde_json::to_string(self).expect("doctor output should serialize")
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::AppError`] when JSON serialization fails.
+    pub(crate) fn to_json(&self) -> Result<String, crate::error::AppError> {
+        serde_json::to_string(self).map_err(|error| {
+            crate::error::AppError::response_parse_failed(format!(
+                "failed to serialize doctor output: {error}"
+            ))
+        })
     }
 }
 
@@ -118,6 +125,10 @@ struct RawDoctorProbe {
 }
 
 /// Parse doctor probe JSON.
+///
+/// # Errors
+///
+/// Returns a string error when the JSON is invalid or `ok` is not `true`.
 pub(crate) fn parse_doctor_probe(raw_json: &str) -> Result<(), String> {
     let probe = serde_json::from_str::<RawDoctorProbe>(raw_json)
         .map_err(|error| format!("failed to parse doctor probe JSON: {error}"))?;
@@ -131,6 +142,9 @@ pub(crate) fn parse_doctor_probe(raw_json: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use serde_json::json;
 
     use super::{DoctorCheck, DoctorOutput, parse_doctor_probe};
@@ -141,8 +155,10 @@ mod tests {
             DoctorCheck::ok("config_files_loaded", "Loaded 1 config file."),
             DoctorCheck::ok("effective_model_chosen", "Using model `gemma3:12b`."),
         ]);
-        let value = serde_json::from_str::<serde_json::Value>(&output.to_json())
-            .expect("json should parse");
+        let value = serde_json::from_str::<serde_json::Value>(
+            &output.to_json().expect("output should serialize"),
+        )
+        .expect("json should parse");
 
         assert_eq!(
             value,

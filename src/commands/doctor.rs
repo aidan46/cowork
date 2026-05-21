@@ -9,6 +9,10 @@ use crate::{
 };
 
 /// Run `doctor` and print JSON.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on cwd lookup or JSON output failure.
 pub(super) fn run_doctor(args: DoctorArgs) -> Result<ExitCode, AppError> {
     let result = run_doctor_json(args)?;
     println!("{}", result.json);
@@ -17,21 +21,29 @@ pub(super) fn run_doctor(args: DoctorArgs) -> Result<ExitCode, AppError> {
 }
 
 /// Run `doctor` in cwd and return JSON result.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on cwd lookup or JSON output failure.
 fn run_doctor_json(args: DoctorArgs) -> Result<DoctorRunResult, AppError> {
     let project_dir = env::current_dir().map_err(|error| {
         AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
     })?;
     let home_dir = env::var_os("HOME").map(std::path::PathBuf::from);
 
-    Ok(run_doctor_json_in(args, &project_dir, home_dir.as_deref()))
+    run_doctor_json_in(args, &project_dir, home_dir.as_deref())
 }
 
 /// Run `doctor` with explicit dirs.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when doctor JSON output serialization fails.
 fn run_doctor_json_in(
     args: DoctorArgs,
     project_dir: &Path,
     home_dir: Option<&Path>,
-) -> DoctorRunResult {
+) -> Result<DoctorRunResult, AppError> {
     let DoctorArgs { model, host } = args;
     let mut checks = Vec::new();
     let config = match resolve_ask_config(project_dir, home_dir, model, host) {
@@ -152,10 +164,14 @@ fn run_doctor_json_in(
 }
 
 /// Map probe error into checks and exit.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when doctor JSON output serialization fails.
 fn doctor_probe_error_result(
     mut checks: Vec<DoctorCheck>,
     error: model::DoctorProbeError,
-) -> DoctorRunResult {
+) -> Result<DoctorRunResult, AppError> {
     match error.kind {
         DoctorProbeErrorKind::BadHost => {
             checks.push(DoctorCheck::error(
@@ -263,18 +279,26 @@ struct DoctorRunResult {
 
 impl DoctorRunResult {
     /// Build success result.
-    fn ok(checks: Vec<DoctorCheck>) -> Self {
-        Self {
-            json: DoctorOutput::ok(checks).to_json(),
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when JSON serialization fails.
+    fn ok(checks: Vec<DoctorCheck>) -> Result<Self, AppError> {
+        Ok(Self {
+            json: DoctorOutput::ok(checks).to_json()?,
             exit_code: DoctorExit::Ok.exit_code(),
-        }
+        })
     }
 
     /// Build error result.
-    fn error(checks: Vec<DoctorCheck>, exit: DoctorExit) -> Self {
-        Self {
-            json: DoctorOutput::error(checks).to_json(),
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when JSON serialization fails.
+    fn error(checks: Vec<DoctorCheck>, exit: DoctorExit) -> Result<Self, AppError> {
+        Ok(Self {
+            json: DoctorOutput::error(checks).to_json()?,
             exit_code: exit.exit_code(),
-        }
+        })
     }
 }

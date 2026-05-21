@@ -22,10 +22,15 @@ pub(crate) struct LocateOutput {
 }
 
 impl LocateOutput {
-    #[must_use]
     /// Serialize output to JSON.
-    pub(crate) fn to_json(&self) -> String {
-        serde_json::to_string(self).expect("locate output should serialize")
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when JSON serialization fails.
+    pub(crate) fn to_json(&self) -> Result<String, AppError> {
+        serde_json::to_string(self).map_err(|error| {
+            AppError::response_parse_failed(format!("failed to serialize locate output: {error}"))
+        })
     }
 }
 
@@ -233,6 +238,10 @@ impl LocateRiskKind {
 }
 
 /// Parse locate output JSON.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when the JSON is invalid or required fields do not match schema.
 pub(crate) fn parse_locate_output(raw_json: &str) -> Result<LocateOutput, AppError> {
     serde_json::from_str::<RawLocateOutput>(raw_json)
         .map(LocateOutput::from)
@@ -243,6 +252,9 @@ pub(crate) fn parse_locate_output(raw_json: &str) -> Result<LocateOutput, AppErr
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use serde_json::json;
 
     use super::parse_locate_output;
@@ -260,8 +272,10 @@ mod tests {
     #[test]
     fn serialized_json_keeps_fixed_top_level_fields() {
         let output = parse_locate_output(&valid_model_json()).expect("output should parse");
-        let value = serde_json::from_str::<serde_json::Value>(&output.to_json())
-            .expect("json should parse");
+        let value = serde_json::from_str::<serde_json::Value>(
+            &output.to_json().expect("output should serialize"),
+        )
+        .expect("json should parse");
 
         assert_eq!(
             value,

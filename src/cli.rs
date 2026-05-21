@@ -153,6 +153,9 @@ pub struct InitModeArgs {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use clap::{CommandFactory, Parser};
 
     use super::{Cli, Command, InitAgent};

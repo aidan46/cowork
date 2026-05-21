@@ -26,6 +26,10 @@ pub(crate) struct LoadedAskFiles {
 }
 
 /// Load ask files and total bytes.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on file read failure or when total bytes exceed the cap.
 pub(crate) fn load_ask_files(
     paths: &[PathBuf],
     max_bytes: Option<usize>,
@@ -52,6 +56,10 @@ pub(crate) fn load_ask_files(
 }
 
 /// Load one ask file when text.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when the file cannot be read.
 fn load_ask_file(path: &Path) -> Result<Option<LoadedAskFile>, AppError> {
     if path.is_symlink() || !path.is_file() {
         return Ok(None);
