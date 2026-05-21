@@ -29,6 +29,10 @@ pub fn run() -> ExitCode {
 }
 
 /// Dispatch parsed subcommand.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when CLI parsing fails or a subcommand returns one.
 fn try_run() -> Result<ExitCode, AppError> {
     let cli = parse_cli()?;
 
@@ -41,6 +45,10 @@ fn try_run() -> Result<ExitCode, AppError> {
 }
 
 /// Parse CLI args or map parse errors.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when CLI args are invalid.
 fn parse_cli() -> Result<Cli, AppError> {
     Cli::try_parse().map_err(|error| match error.kind() {
         ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => error.exit(),

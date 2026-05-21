@@ -7,6 +7,10 @@ use crate::{
 };
 
 /// Run `init`.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when target file read, managed block update, or write fails.
 pub(super) fn run_init(args: InitArgs) -> Result<ExitCode, AppError> {
     let (agent, mode) = match args.agent {
         InitAgent::Codex(mode) => ("codex", mode),

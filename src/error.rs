@@ -1,6 +1,6 @@
 use std::{io, path::Path, process::ExitCode};
 
-use serde::Serialize;
+use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::output::{cli_command, init_command};
@@ -169,7 +169,20 @@ impl AppError {
     #[must_use]
     /// Serialize JSON error output.
     pub fn to_json(&self) -> String {
-        serde_json::to_string(&ErrorResponse::from(self)).expect("error response should serialize")
+        let mut error = Map::with_capacity(3);
+        error.insert(String::from("code"), Value::from(self.code()));
+        error.insert(String::from("message"), Value::from(self.to_string()));
+        if let Some(hint) = self.hint() {
+            error.insert(String::from("hint"), Value::from(hint));
+        }
+
+        let mut root = Map::with_capacity(4);
+        root.insert(String::from("schema_version"), Value::from("1.0"));
+        root.insert(String::from("command"), Value::from(self.command()));
+        root.insert(String::from("status"), Value::from("error"));
+        root.insert(String::from("error"), Value::Object(error));
+
+        Value::Object(root).to_string()
     }
 
     #[must_use]
@@ -238,49 +251,11 @@ impl DoctorExit {
     }
 }
 
-#[derive(Debug, Serialize)]
-/// Serialized error envelope.
-struct ErrorResponse<'a> {
-    /// JSON schema version.
-    schema_version: &'a str,
-    /// Command tag.
-    command: &'a str,
-    /// Output status.
-    status: &'a str,
-    /// Error body.
-    error: ErrorBody<'a>,
-}
-
-#[derive(Debug, Serialize)]
-/// Serialized error body.
-struct ErrorBody<'a> {
-    /// Stable error code.
-    code: &'a str,
-    /// Human error text.
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    /// Optional fix hint.
-    hint: Option<&'a str>,
-}
-
-impl<'a> From<&'a AppError> for ErrorResponse<'a> {
-    /// Convert app error into JSON envelope.
-    fn from(error: &'a AppError) -> Self {
-        Self {
-            schema_version: "1.0",
-            command: error.command(),
-            status: "error",
-            error: ErrorBody {
-                code: error.code(),
-                message: error.to_string(),
-                hint: error.hint(),
-            },
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use std::process::ExitCode;
 
     use serde_json::json;

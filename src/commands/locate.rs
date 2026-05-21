@@ -10,6 +10,10 @@ use crate::{
 };
 
 /// Run `locate` and print JSON.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on file, config, model, or JSON output failure.
 pub(super) fn run_locate(args: LocateArgs) -> Result<ExitCode, AppError> {
     let locate_json = run_locate_json(args)?;
     println!("{locate_json}");
@@ -18,6 +22,10 @@ pub(super) fn run_locate(args: LocateArgs) -> Result<ExitCode, AppError> {
 }
 
 /// Run `locate` in cwd and return JSON.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on cwd lookup, file load, config, model, or JSON output failure.
 fn run_locate_json(args: LocateArgs) -> Result<String, AppError> {
     let project_dir = env::current_dir().map_err(|error| {
         AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
@@ -28,6 +36,10 @@ fn run_locate_json(args: LocateArgs) -> Result<String, AppError> {
 }
 
 /// Run `locate` with explicit dirs.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on file load, config, model, parse, or JSON output failure.
 fn run_locate_json_in(
     args: LocateArgs,
     project_dir: &Path,
@@ -54,5 +66,5 @@ fn run_locate_json_in(
     let raw_output = model::request_generate(&config.host, model, &prompt)?;
     let output = output::parse_locate_output(&raw_output)?;
 
-    Ok(output.to_json())
+    output.to_json()
 }

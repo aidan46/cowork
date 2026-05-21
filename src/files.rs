@@ -8,6 +8,9 @@ pub(crate) use load::{LoadedAskFile, LoadedAskFiles, load_ask_files};
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use std::{
         env, fs,
         path::{Path, PathBuf},

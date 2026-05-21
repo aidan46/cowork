@@ -10,6 +10,10 @@ use crate::{
 };
 
 /// Run `ask` and print JSON.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on file, config, model, or JSON output failure.
 pub(super) fn run_ask(args: AskArgs) -> Result<ExitCode, AppError> {
     let ask_json = run_ask_json(args)?;
     println!("{ask_json}");
@@ -18,6 +22,10 @@ pub(super) fn run_ask(args: AskArgs) -> Result<ExitCode, AppError> {
 }
 
 /// Run `ask` in cwd and return JSON.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on cwd lookup, file load, config, model, or JSON output failure.
 fn run_ask_json(args: AskArgs) -> Result<String, AppError> {
     let project_dir = env::current_dir().map_err(|error| {
         AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
@@ -28,6 +36,10 @@ fn run_ask_json(args: AskArgs) -> Result<String, AppError> {
 }
 
 /// Run `ask` with explicit dirs.
+///
+/// # Errors
+///
+/// Returns [`AppError`] on file load, config, model, parse, or JSON output failure.
 pub(crate) fn run_ask_json_in(
     args: AskArgs,
     project_dir: &Path,
@@ -54,5 +66,5 @@ pub(crate) fn run_ask_json_in(
     let raw_output = model::request_generate(&config.host, model, &prompt)?;
     let output = output::parse_ask_output(&raw_output)?;
 
-    Ok(output.to_json())
+    output.to_json()
 }

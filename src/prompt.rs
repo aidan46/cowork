@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use crate::files::{LoadedAskFile, LoadedAskFiles};
 
 /// Prompt role line.
@@ -42,24 +40,23 @@ const LOCATE_SCHEMA_BLOCK: &str = concat!(
 pub(crate) fn render_ask_prompt(question: &str, loaded_files: &LoadedAskFiles) -> String {
     let mut prompt = String::new();
 
-    writeln!(&mut prompt, "{ROLE_LINE}").expect("write to string");
+    push_line(&mut prompt, ROLE_LINE);
     for rule in HARD_RULES {
-        writeln!(&mut prompt, "{rule}").expect("write to string");
+        push_line(&mut prompt, rule);
     }
-    writeln!(
+    push_line(
         &mut prompt,
-        "If evidence missing, set answer.not_found = true."
-    )
-    .expect("write to string");
-    writeln!(&mut prompt, "Keep output concise.").expect("write to string");
-    writeln!(&mut prompt).expect("write to string");
-    writeln!(&mut prompt, "Question:").expect("write to string");
-    writeln!(&mut prompt, "{question}").expect("write to string");
-    writeln!(&mut prompt).expect("write to string");
-    writeln!(&mut prompt, "Schema:").expect("write to string");
-    writeln!(&mut prompt, "{ASK_SCHEMA_BLOCK}").expect("write to string");
-    writeln!(&mut prompt).expect("write to string");
-    writeln!(&mut prompt, "Files:").expect("write to string");
+        "If evidence missing, set answer.not_found = true.",
+    );
+    push_line(&mut prompt, "Keep output concise.");
+    prompt.push('\n');
+    push_line(&mut prompt, "Question:");
+    push_line(&mut prompt, question);
+    prompt.push('\n');
+    push_line(&mut prompt, "Schema:");
+    push_line(&mut prompt, ASK_SCHEMA_BLOCK);
+    prompt.push('\n');
+    push_line(&mut prompt, "Files:");
 
     for file in &loaded_files.files {
         render_file_block(&mut prompt, file);
@@ -72,25 +69,25 @@ pub(crate) fn render_ask_prompt(question: &str, loaded_files: &LoadedAskFiles) -
 pub(crate) fn render_locate_prompt(thing: &str, loaded_files: &LoadedAskFiles) -> String {
     let mut prompt = String::new();
 
-    writeln!(&mut prompt, "{ROLE_LINE}").expect("write to string");
+    push_line(&mut prompt, ROLE_LINE);
     for rule in HARD_RULES {
-        writeln!(&mut prompt, "{rule}").expect("write to string");
+        push_line(&mut prompt, rule);
     }
-    writeln!(&mut prompt, "Find likely files and symbols only.").expect("write to string");
-    writeln!(&mut prompt, "No long explanation.").expect("write to string");
-    writeln!(&mut prompt, "No edit plan.").expect("write to string");
-    writeln!(&mut prompt, "Use empty arrays when unsure.").expect("write to string");
-    writeln!(&mut prompt).expect("write to string");
-    writeln!(&mut prompt, "Thing:").expect("write to string");
-    writeln!(&mut prompt, "{thing}").expect("write to string");
-    writeln!(&mut prompt).expect("write to string");
-    writeln!(&mut prompt, "Schema:").expect("write to string");
-    writeln!(&mut prompt, "{LOCATE_SCHEMA_BLOCK}").expect("write to string");
-    writeln!(&mut prompt).expect("write to string");
-    writeln!(&mut prompt, "Sort matches by confidence, then path.").expect("write to string");
-    writeln!(&mut prompt, "Keep next_reads short and concrete.").expect("write to string");
-    writeln!(&mut prompt).expect("write to string");
-    writeln!(&mut prompt, "Files:").expect("write to string");
+    push_line(&mut prompt, "Find likely files and symbols only.");
+    push_line(&mut prompt, "No long explanation.");
+    push_line(&mut prompt, "No edit plan.");
+    push_line(&mut prompt, "Use empty arrays when unsure.");
+    prompt.push('\n');
+    push_line(&mut prompt, "Thing:");
+    push_line(&mut prompt, thing);
+    prompt.push('\n');
+    push_line(&mut prompt, "Schema:");
+    push_line(&mut prompt, LOCATE_SCHEMA_BLOCK);
+    prompt.push('\n');
+    push_line(&mut prompt, "Sort matches by confidence, then path.");
+    push_line(&mut prompt, "Keep next_reads short and concrete.");
+    prompt.push('\n');
+    push_line(&mut prompt, "Files:");
 
     for file in &loaded_files.files {
         render_file_block(&mut prompt, file);
@@ -101,16 +98,27 @@ pub(crate) fn render_locate_prompt(thing: &str, loaded_files: &LoadedAskFiles) -
 
 /// Append one file block.
 fn render_file_block(prompt: &mut String, file: &LoadedAskFile) {
-    writeln!(prompt, "<file path=\"{}\">", file.path.display()).expect("write to string");
+    prompt.push_str("<file path=\"");
+    prompt.push_str(&file.path.display().to_string());
+    prompt.push_str("\">\n");
     prompt.push_str(&file.content);
     if !file.content.ends_with('\n') {
         prompt.push('\n');
     }
-    writeln!(prompt, "</file>").expect("write to string");
+    prompt.push_str("</file>\n");
+}
+
+/// Push one line and newline.
+fn push_line(prompt: &mut String, line: &str) {
+    prompt.push_str(line);
+    prompt.push('\n');
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
+    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
+
     use std::path::PathBuf;
 
     use super::{render_ask_prompt, render_locate_prompt};
