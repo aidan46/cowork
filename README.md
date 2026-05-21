@@ -68,6 +68,15 @@ cowork ask \
   --model your-model
 ```
 
+Or locate first, then decide what to read:
+
+```bash
+cowork locate \
+  --paths src \
+  --thing "CLI parser" \
+  --model your-model
+```
+
 If you use same model often, put it in config and drop `--model` from command:
 
 ```toml
@@ -139,7 +148,7 @@ Example success shape:
 
 ## Scope today
 
-- three subcommands: `doctor`, `ask`, `init`
+- four subcommands: `doctor`, `ask`, `locate`, `init`
 - `init --print` prints short agent rules
 - `init --write` writes bounded managed blocks to `AGENTS.md` or `CLAUDE.md`
 - JSON stdout only, even on errors
@@ -150,4 +159,4 @@ Example success shape:
 
 - read [SUPPORT.md](SUPPORT.md) for usage questions and bug reports
 - read [CONTRIBUTING.md](CONTRIBUTING.md) before opening PR
-- use `cowork doctor --help`, `cowork ask --help`, and `cowork init --help` for current flag surface
+- use `cowork doctor --help`, `cowork ask --help`, `cowork locate --help`, and `cowork init --help` for current flag surface

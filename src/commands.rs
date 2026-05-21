@@ -7,6 +7,7 @@ use crate::{Cli, Command, error::AppError};
 mod ask;
 mod doctor;
 mod init;
+mod locate;
 
 #[cfg(test)]
 pub(crate) use ask::run_ask_json_in;
@@ -28,6 +29,7 @@ fn try_run() -> Result<ExitCode, AppError> {
 
     match cli.command {
         Command::Ask(args) => ask::run_ask(args),
+        Command::Locate(args) => locate::run_locate(args),
         Command::Doctor(args) => doctor::run_doctor(args),
         Command::Init(args) => init::run_init(args),
     }

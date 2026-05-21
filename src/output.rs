@@ -1,12 +1,14 @@
 mod ask;
 mod doctor;
 mod init;
+mod locate;
 
 const SCHEMA_VERSION: &str = "1.0";
 const ASK_COMMAND: &str = "ask";
 const CLI_COMMAND: &str = "cli";
 const DOCTOR_COMMAND: &str = "doctor";
 const INIT_COMMAND: &str = "init";
+const LOCATE_COMMAND: &str = "locate";
 const STATUS_OK: &str = "ok";
 const STATUS_ERROR: &str = "error";
 const CODEX_INIT_RULES: &str = r#"# cowork rules for Codex
@@ -33,6 +35,7 @@ const CLAUDE_INIT_RULES: &str = r#"# cowork rules for Claude
 pub(crate) use ask::parse_ask_output;
 pub(crate) use doctor::{DoctorCheck, DoctorOutput, parse_doctor_probe};
 pub(crate) use init::{init_target_file, render_init_rules, update_init_managed_block};
+pub(crate) use locate::parse_locate_output;
 
 #[must_use]
 pub(crate) fn cli_command() -> &'static str {

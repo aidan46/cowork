@@ -12,7 +12,7 @@ mod model;
 mod output;
 mod prompt;
 
-pub use cli::{AskArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitModeArgs};
+pub use cli::{AskArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitModeArgs, LocateArgs};
 pub use commands::run;
 
 #[cfg(test)]

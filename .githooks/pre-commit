@@ -6,6 +6,21 @@ set -euo pipefail
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
+staged_ignored="$(
+  git diff --cached --name-only -z --diff-filter=ACMR \
+    | git check-ignore --no-index --stdin -z 2>/dev/null \
+    | tr '\0' '\n' \
+    | sed '/^$/d' \
+    || true
+)"
+
+if [[ -n "$staged_ignored" ]]; then
+  echo "pre-commit: ignored paths staged"
+  printf '%s\n' "$staged_ignored"
+  echo "unstage ignored paths before commit"
+  exit 1
+fi
+
 if ! command -v taplo >/dev/null 2>&1; then
   echo "pre-commit: need taplo"
   echo "install: cargo install taplo-cli --locked"
