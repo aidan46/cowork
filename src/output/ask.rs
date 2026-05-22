@@ -73,19 +73,36 @@ struct RawAskOutput {
 }
 
 impl AskOutput {
-    /// Add fixed top-level fields.
+    /// Add fixed fields, normalize order.
     fn from_raw(value: RawAskOutput, metadata: CommandMetadata) -> Self {
+        let mut files = value.files;
+        let mut symbols = value.symbols;
+        let mut evidence = value.evidence;
+        let mut risks = value.risks;
+        let mut next_reads = value.next_reads;
+
+        files.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        files.dedup();
+        symbols.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        symbols.dedup();
+        evidence.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        evidence.dedup();
+        risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        risks.dedup();
+        next_reads.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        next_reads.dedup();
+
         Self {
             schema_version: SCHEMA_VERSION,
             command: ASK_COMMAND,
             status: STATUS_OK,
             question: value.question,
             answer: value.answer,
-            files: value.files,
-            symbols: value.symbols,
-            evidence: value.evidence,
-            risks: value.risks,
-            next_reads: value.next_reads,
+            files,
+            symbols,
+            evidence,
+            risks,
+            next_reads,
             metadata,
         }
     }
@@ -115,6 +132,18 @@ struct AskFile {
     bytes: usize,
 }
 
+impl AskFile {
+    /// Build stable sort key.
+    fn sort_key(&self) -> (&str, u8, &str, usize) {
+        (
+            self.path.as_str(),
+            if self.included { 0 } else { 1 },
+            self.reason.as_str(),
+            self.bytes,
+        )
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 /// One symbol evidence row.
 struct AskSymbol {
@@ -128,6 +157,18 @@ struct AskSymbol {
     relevance: String,
 }
 
+impl AskSymbol {
+    /// Build stable sort key.
+    fn sort_key(&self) -> (&str, &str, &str, &str) {
+        (
+            self.path.as_str(),
+            self.name.as_str(),
+            self.kind.as_str(),
+            self.relevance.as_str(),
+        )
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 /// One evidence note.
 struct AskEvidence {
@@ -139,6 +180,13 @@ struct AskEvidence {
     note: String,
 }
 
+impl AskEvidence {
+    /// Build stable sort key.
+    fn sort_key(&self) -> (&str, &str, &str) {
+        (self.path.as_str(), self.symbol.as_str(), self.note.as_str())
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 /// One risk row.
 struct AskRisk {
@@ -148,6 +196,13 @@ struct AskRisk {
     message: String,
 }
 
+impl AskRisk {
+    /// Build stable sort key.
+    fn sort_key(&self) -> (&str, &str) {
+        (self.kind.as_str(), self.message.as_str())
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 /// One next-read row.
 struct AskNextRead {
@@ -155,6 +210,13 @@ struct AskNextRead {
     path: String,
     /// Read reason.
     reason: String,
+}
+
+impl AskNextRead {
+    /// Build stable sort key.
+    fn sort_key(&self) -> (&str, &str) {
+        (self.path.as_str(), self.reason.as_str())
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -199,6 +261,25 @@ enum AskSymbolKind {
     Unknown,
 }
 
+impl AskSymbolKind {
+    /// Return API string for kind.
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Function => "function",
+            Self::Type => "type",
+            Self::Trait => "trait",
+            Self::Impl => "impl",
+            Self::Module => "module",
+            Self::Constant => "constant",
+            Self::Variable => "variable",
+            Self::Route => "route",
+            Self::Component => "component",
+            Self::Test => "test",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Ask risk kind.
@@ -215,6 +296,20 @@ enum AskRiskKind {
     UnsupportedFile,
     /// Unknown risk.
     Unknown,
+}
+
+impl AskRiskKind {
+    /// Return API string for risk.
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::MissingContext => "missing_context",
+            Self::ModelUncertainty => "model_uncertainty",
+            Self::ParseError => "parse_error",
+            Self::SkippedFile => "skipped_file",
+            Self::UnsupportedFile => "unsupported_file",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 /// Parse ask output JSON.
@@ -264,6 +359,105 @@ mod tests {
     }
 
     #[test]
+    fn parsed_output_sorts_and_dedupes_rows() {
+        let output = parse_ask_output(&unsorted_duplicate_model_json(), metadata())
+            .expect("output should parse");
+
+        assert_eq!(
+            serde_json::to_value(&output.files).expect("files should serialize"),
+            json!([
+                {
+                    "path": "src/a.rs",
+                    "included": true,
+                    "reason": "Contains auth flow.",
+                    "bytes": 10
+                },
+                {
+                    "path": "src/a.rs",
+                    "included": true,
+                    "reason": "Contains auth flow.",
+                    "bytes": 30
+                },
+                {
+                    "path": "src/z.rs",
+                    "included": false,
+                    "reason": "Skipped binary snapshot.",
+                    "bytes": 12
+                }
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value(&output.symbols).expect("symbols should serialize"),
+            json!([
+                {
+                    "name": "AuthState",
+                    "kind": "type",
+                    "path": "src/a.rs",
+                    "relevance": "Owns auth state."
+                },
+                {
+                    "name": "authenticate",
+                    "kind": "function",
+                    "path": "src/a.rs",
+                    "relevance": "Runs auth checks."
+                },
+                {
+                    "name": "snapshot_auth",
+                    "kind": "function",
+                    "path": "src/z.rs",
+                    "relevance": "Exports auth snapshot."
+                }
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value(&output.evidence).expect("evidence should serialize"),
+            json!([
+                {
+                    "path": "src/a.rs",
+                    "symbol": "AuthState",
+                    "note": "Holds request auth state."
+                },
+                {
+                    "path": "src/a.rs",
+                    "symbol": "authenticate",
+                    "note": "Rejects bad tokens."
+                },
+                {
+                    "path": "src/z.rs",
+                    "symbol": "snapshot_auth",
+                    "note": "Writes auth snapshot."
+                }
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value(&output.risks).expect("risks should serialize"),
+            json!([
+                {
+                    "kind": "missing_context",
+                    "message": "Tests missing."
+                },
+                {
+                    "kind": "unsupported_file",
+                    "message": "Binary snapshot skipped."
+                }
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value(&output.next_reads).expect("next reads should serialize"),
+            json!([
+                {
+                    "path": "src/a/tests.rs",
+                    "reason": "Likely covers auth edges."
+                },
+                {
+                    "path": "src/z/tests.rs",
+                    "reason": "Likely covers snapshot edges."
+                }
+            ])
+        );
+    }
+
+    #[test]
     fn serialized_json_uses_cli_owned_metadata() {
         let output =
             parse_ask_output(&valid_model_json(), metadata()).expect("output should parse");
@@ -281,6 +475,116 @@ mod tests {
                 .and_then(|ratio| ratio.parse::<f64>().ok())
                 .is_some_and(|ratio| ratio > 1.0)
         );
+    }
+
+    #[test]
+    fn serialized_json_normalizes_row_order_and_dedupes() {
+        let output = parse_ask_output(&unsorted_duplicate_model_json(), metadata())
+            .expect("output should parse");
+        let mut value = serde_json::from_str::<serde_json::Value>(
+            &output.into_json().expect("output should serialize"),
+        )
+        .expect("json should parse");
+        let metadata = value
+            .as_object_mut()
+            .and_then(|root| root.remove("metadata"))
+            .expect("metadata should exist");
+
+        assert_eq!(
+            value,
+            json!({
+                "schema_version": "1.0",
+                "command": "ask",
+                "status": "ok",
+                "question": "Where does auth state live?",
+                "answer": {
+                    "summary": "Auth state lives in src/a.rs.",
+                    "confidence": "medium",
+                    "not_found": false
+                },
+                "files": [
+                    {
+                        "path": "src/a.rs",
+                        "included": true,
+                        "reason": "Contains auth flow.",
+                        "bytes": 10
+                    },
+                    {
+                        "path": "src/a.rs",
+                        "included": true,
+                        "reason": "Contains auth flow.",
+                        "bytes": 30
+                    },
+                    {
+                        "path": "src/z.rs",
+                        "included": false,
+                        "reason": "Skipped binary snapshot.",
+                        "bytes": 12
+                    }
+                ],
+                "symbols": [
+                    {
+                        "name": "AuthState",
+                        "kind": "type",
+                        "path": "src/a.rs",
+                        "relevance": "Owns auth state."
+                    },
+                    {
+                        "name": "authenticate",
+                        "kind": "function",
+                        "path": "src/a.rs",
+                        "relevance": "Runs auth checks."
+                    },
+                    {
+                        "name": "snapshot_auth",
+                        "kind": "function",
+                        "path": "src/z.rs",
+                        "relevance": "Exports auth snapshot."
+                    }
+                ],
+                "evidence": [
+                    {
+                        "path": "src/a.rs",
+                        "symbol": "AuthState",
+                        "note": "Holds request auth state."
+                    },
+                    {
+                        "path": "src/a.rs",
+                        "symbol": "authenticate",
+                        "note": "Rejects bad tokens."
+                    },
+                    {
+                        "path": "src/z.rs",
+                        "symbol": "snapshot_auth",
+                        "note": "Writes auth snapshot."
+                    }
+                ],
+                "risks": [
+                    {
+                        "kind": "missing_context",
+                        "message": "Tests missing."
+                    },
+                    {
+                        "kind": "unsupported_file",
+                        "message": "Binary snapshot skipped."
+                    }
+                ],
+                "next_reads": [
+                    {
+                        "path": "src/a/tests.rs",
+                        "reason": "Likely covers auth edges."
+                    },
+                    {
+                        "path": "src/z/tests.rs",
+                        "reason": "Likely covers snapshot edges."
+                    }
+                ]
+            })
+        );
+
+        assert_eq!(metadata["input_bytes"], 12420);
+        assert_eq!(metadata["duration_ms"], 980);
+        assert!(metadata["output_bytes"].as_u64().unwrap_or(0) > 0);
     }
 
     #[test]
@@ -435,6 +739,120 @@ mod tests {
                 {
                     "path": "src/auth/tests.rs",
                     "reason": "Likely contains authentication edge cases."
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn unsorted_duplicate_model_json() -> String {
+        json!({
+            "question": "Where does auth state live?",
+            "answer": {
+                "summary": "Auth state lives in src/a.rs.",
+                "confidence": "medium",
+                "not_found": false
+            },
+            "files": [
+                {
+                    "path": "src/z.rs",
+                    "included": false,
+                    "reason": "Skipped binary snapshot.",
+                    "bytes": 12
+                },
+                {
+                    "path": "src/a.rs",
+                    "included": true,
+                    "reason": "Contains auth flow.",
+                    "bytes": 30
+                },
+                {
+                    "path": "src/a.rs",
+                    "included": true,
+                    "reason": "Contains auth flow.",
+                    "bytes": 10
+                },
+                {
+                    "path": "src/a.rs",
+                    "included": true,
+                    "reason": "Contains auth flow.",
+                    "bytes": 30
+                }
+            ],
+            "symbols": [
+                {
+                    "name": "snapshot_auth",
+                    "kind": "function",
+                    "path": "src/z.rs",
+                    "relevance": "Exports auth snapshot."
+                },
+                {
+                    "name": "authenticate",
+                    "kind": "function",
+                    "path": "src/a.rs",
+                    "relevance": "Runs auth checks."
+                },
+                {
+                    "name": "AuthState",
+                    "kind": "type",
+                    "path": "src/a.rs",
+                    "relevance": "Owns auth state."
+                },
+                {
+                    "name": "authenticate",
+                    "kind": "function",
+                    "path": "src/a.rs",
+                    "relevance": "Runs auth checks."
+                }
+            ],
+            "evidence": [
+                {
+                    "path": "src/z.rs",
+                    "symbol": "snapshot_auth",
+                    "note": "Writes auth snapshot."
+                },
+                {
+                    "path": "src/a.rs",
+                    "symbol": "authenticate",
+                    "note": "Rejects bad tokens."
+                },
+                {
+                    "path": "src/a.rs",
+                    "symbol": "AuthState",
+                    "note": "Holds request auth state."
+                },
+                {
+                    "path": "src/a.rs",
+                    "symbol": "authenticate",
+                    "note": "Rejects bad tokens."
+                }
+            ],
+            "risks": [
+                {
+                    "kind": "unsupported_file",
+                    "message": "Binary snapshot skipped."
+                },
+                {
+                    "kind": "missing_context",
+                    "message": "Tests missing."
+                },
+                {
+                    "kind": "missing_context",
+                    "message": "Tests missing."
+                }
+            ],
+            "next_reads": [
+                {
+                    "path": "src/z/tests.rs",
+                    "reason": "Likely covers snapshot edges."
+                },
+                {
+                    "path": "src/a/tests.rs",
+                    "reason": "Likely covers auth edges."
+                },
+                {
+                    "path": "src/a/tests.rs",
+                    "reason": "Likely covers auth edges."
                 }
             ]
         })
