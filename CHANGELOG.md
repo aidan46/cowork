@@ -2,6 +2,22 @@
 
 All notable changes to `cowork` land here.
 
+## Unreleased
+
+## v0.2.0, 2026-05-21
+
+### Added
+
+- `cowork doctor` for local setup diagnostics and probe checks
+- `cowork init codex --print` and `cowork init claude --print`
+- `cowork init codex --write` and `cowork init claude --write`
+- `cowork locate` for symbol and file lookup
+
+### Changed
+
+- split output helpers and command runner into narrower modules
+- lint policy now blocks production `expect` and `unwrap`
+
 ## v0.1.0, 2026-05-20
 
 ### Added
