@@ -6,6 +6,8 @@ use crate::{Cli, Command, error::AppError};
 
 /// Ask command run flow.
 mod ask;
+/// Brief command run flow.
+mod brief;
 /// Doctor command run flow.
 mod doctor;
 /// Init command run flow.
@@ -15,6 +17,8 @@ mod locate;
 
 #[cfg(test)]
 pub(crate) use ask::run_ask_json_in;
+#[cfg(test)]
+pub(crate) use brief::run_brief_json_in;
 
 /// Run `cowork`.
 #[must_use]
@@ -38,6 +42,7 @@ fn try_run() -> Result<ExitCode, AppError> {
 
     match cli.command {
         Command::Ask(args) => ask::run_ask(args),
+        Command::Brief(args) => brief::run_brief(args),
         Command::Locate(args) => locate::run_locate(args),
         Command::Doctor(args) => doctor::run_doctor(args),
         Command::Init(args) => init::run_init(args),

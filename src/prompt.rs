@@ -25,6 +25,19 @@ const ASK_SCHEMA_BLOCK: &str = concat!(
     "risks:[{kind:\"missing_context\"|\"model_uncertainty\"|\"parse_error\"|\"skipped_file\"|\"unsupported_file\"|\"unknown\",message:string}]\n",
     "next_reads:[{path:string,reason:string}]"
 );
+/// Brief schema block.
+const BRIEF_SCHEMA_BLOCK: &str = concat!(
+    "schema_version:string\n",
+    "command:\"brief\"\n",
+    "status:\"ok\"\n",
+    "goal:string\n",
+    "brief:{summary:string,confidence:\"high\"|\"medium\"|\"low\"|\"unknown\",not_found:boolean}\n",
+    "files:[{path:string,role:string,key_points:[string],bytes:number}]\n",
+    "symbols:[{name:string,kind:\"function\"|\"type\"|\"trait\"|\"impl\"|\"module\"|\"constant\"|\"variable\"|\"route\"|\"component\"|\"test\"|\"unknown\",path:string,responsibility:string}]\n",
+    "evidence:[{path:string,symbol:string,note:string}]\n",
+    "risks:[{kind:\"missing_context\"|\"model_uncertainty\"|\"parse_error\"|\"skipped_file\"|\"unsupported_file\"|\"unknown\",message:string}]\n",
+    "next_reads:[{path:string,reason:string}]"
+);
 /// Locate schema block.
 const LOCATE_SCHEMA_BLOCK: &str = concat!(
     "schema_version:string\n",
@@ -95,6 +108,40 @@ pub(crate) fn render_locate_prompt(thing: &str, loaded_files: &LoadedAskFiles) -
     prompt
 }
 
+/// Render brief prompt text.
+pub(crate) fn render_brief_prompt(goal: &str, loaded_files: &LoadedAskFiles) -> String {
+    let mut prompt = String::new();
+
+    push_line(&mut prompt, ROLE_LINE);
+    for rule in HARD_RULES {
+        push_line(&mut prompt, rule);
+    }
+    push_line(&mut prompt, "Summarize only provided files for goal.");
+    push_line(&mut prompt, "Explain why each file matters.");
+    push_line(&mut prompt, "No edit plan.");
+    push_line(&mut prompt, "No long evidence snippets.");
+    push_line(&mut prompt, "Use empty arrays when unsure.");
+    prompt.push('\n');
+    push_line(&mut prompt, "Goal:");
+    push_line(&mut prompt, goal);
+    prompt.push('\n');
+    push_line(&mut prompt, "Schema:");
+    push_line(&mut prompt, BRIEF_SCHEMA_BLOCK);
+    prompt.push('\n');
+    push_line(
+        &mut prompt,
+        "Keep summary, evidence, and next_reads compact.",
+    );
+    prompt.push('\n');
+    push_line(&mut prompt, "Files:");
+
+    for file in &loaded_files.files {
+        render_file_block(&mut prompt, file);
+    }
+
+    prompt
+}
+
 /// Append one file block.
 fn render_file_block(prompt: &mut String, file: &LoadedAskFile) {
     prompt.push_str("<file path=\"");
@@ -120,7 +167,7 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use super::{render_ask_prompt, render_locate_prompt};
+    use super::{render_ask_prompt, render_brief_prompt, render_locate_prompt};
     use crate::files::{LoadedAskFile, LoadedAskFiles};
 
     #[test]
@@ -149,6 +196,18 @@ mod tests {
         assert!(prompt.contains("command:\"locate\""));
         assert!(prompt.contains("matches:[{path:string,symbol?:string"));
         assert!(prompt.contains("risks:[{kind:\"missing_context\""));
+    }
+
+    #[test]
+    fn brief_prompt_includes_brief_schema_fields() {
+        let prompt = render_brief_prompt("trace CLI flow", &loaded_files([]));
+
+        assert!(prompt.contains("command:\"brief\""));
+        assert!(prompt.contains("brief:{summary:string,confidence:"));
+        assert!(
+            prompt.contains("files:[{path:string,role:string,key_points:[string],bytes:number}]")
+        );
+        assert!(!prompt.contains("metadata:{input_bytes:number,duration_ms:number}"));
     }
 
     #[test]
@@ -184,6 +243,13 @@ mod tests {
         let prompt = render_locate_prompt("auth middleware", &loaded_files([]));
 
         assert!(prompt.contains("Thing:\nauth middleware"));
+    }
+
+    #[test]
+    fn brief_prompt_includes_goal() {
+        let prompt = render_brief_prompt("trace CLI flow", &loaded_files([]));
+
+        assert!(prompt.contains("Goal:\ntrace CLI flow"));
     }
 
     fn loaded_files<const N: usize>(files: [LoadedAskFile; N]) -> LoadedAskFiles {

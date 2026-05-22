@@ -19,6 +19,9 @@ pub enum Command {
     /// Ask about file context.
     #[command(arg_required_else_help = true)]
     Ask(AskArgs),
+    /// Build compact file brief.
+    #[command(arg_required_else_help = true)]
+    Brief(BriefArgs),
     /// Locate likely files and symbols.
     #[command(arg_required_else_help = true)]
     Locate(LocateArgs),
@@ -39,6 +42,46 @@ pub struct AskArgs {
     /// Narrow question to answer.
     #[arg(long, required = true, value_name = "QUESTION")]
     pub question: String,
+
+    /// Model override.
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+
+    /// Host override.
+    #[arg(long, value_name = "HOST")]
+    pub host: Option<String>,
+
+    /// Max input bytes.
+    #[arg(long, value_name = "BYTES")]
+    pub max_bytes: Option<usize>,
+
+    /// Recurse into dirs.
+    #[arg(long)]
+    pub recursive: bool,
+
+    /// Include glob.
+    #[arg(long, value_name = "GLOB")]
+    pub include: Vec<String>,
+
+    /// Exclude glob.
+    #[arg(long, value_name = "GLOB")]
+    pub exclude: Vec<String>,
+
+    /// Fail on missing path.
+    #[arg(long)]
+    pub fail_on_missing: bool,
+}
+
+/// Args for `cowork brief`.
+#[derive(Debug, Args)]
+pub struct BriefArgs {
+    /// Files or dirs to inspect.
+    #[arg(long, required = true, num_args = 1.., value_name = "PATHS", value_hint = ValueHint::AnyPath)]
+    pub paths: Vec<PathBuf>,
+
+    /// Goal to brief for.
+    #[arg(long, required = true, value_name = "GOAL")]
+    pub goal: String,
 
     /// Model override.
     #[arg(long, value_name = "MODEL")]
@@ -178,6 +221,7 @@ mod tests {
                 assert_eq!(args.paths.len(), 2);
                 assert_eq!(args.question, "Where is CLI parsing defined?");
             }
+            Command::Brief(_) => panic!("expected ask command"),
             Command::Locate(_) => panic!("expected ask command"),
             Command::Doctor(_) => panic!("expected ask command"),
             Command::Init(_) => panic!("expected ask command"),
@@ -202,6 +246,49 @@ mod tests {
     }
 
     #[test]
+    fn brief_parses_required_flags() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "brief",
+            "--paths",
+            "src",
+            "Cargo.toml",
+            "--goal",
+            "trace CLI flow",
+        ])
+        .expect("brief args should parse");
+
+        match cli.command {
+            Command::Brief(args) => {
+                assert_eq!(args.paths.len(), 2);
+                assert_eq!(args.goal, "trace CLI flow");
+            }
+            Command::Ask(_) => panic!("expected brief command"),
+            Command::Locate(_) => panic!("expected brief command"),
+            Command::Doctor(_) => panic!("expected brief command"),
+            Command::Init(_) => panic!("expected brief command"),
+        }
+    }
+
+    #[test]
+    fn brief_help_shows_required_flags() {
+        let mut command = Cli::command();
+        let brief = command
+            .find_subcommand_mut("brief")
+            .expect("brief subcommand should exist");
+        let mut help = Vec::new();
+
+        brief
+            .write_long_help(&mut help)
+            .expect("brief help should render");
+
+        let help = String::from_utf8(help).expect("help should be utf-8");
+
+        assert!(help.contains("--paths <PATHS>..."));
+        assert!(help.contains("--goal <GOAL>"));
+    }
+
+    #[test]
     fn locate_parses_required_flags() {
         let cli = Cli::try_parse_from([
             "cowork",
@@ -220,6 +307,7 @@ mod tests {
                 assert_eq!(args.thing, "CLI parser");
             }
             Command::Ask(_) => panic!("expected locate command"),
+            Command::Brief(_) => panic!("expected locate command"),
             Command::Doctor(_) => panic!("expected locate command"),
             Command::Init(_) => panic!("expected locate command"),
         }
@@ -261,6 +349,7 @@ mod tests {
                 assert_eq!(args.host.as_deref(), Some("http://localhost:11434"));
             }
             Command::Ask(_) => panic!("expected doctor command"),
+            Command::Brief(_) => panic!("expected doctor command"),
             Command::Locate(_) => panic!("expected doctor command"),
             Command::Init(_) => panic!("expected doctor command"),
         }
