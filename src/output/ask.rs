@@ -1,8 +1,36 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
 use super::{ASK_COMMAND, CommandMetadata, SCHEMA_VERSION, STATUS_OK};
+
+/// Max file rows.
+const MAX_FILES: usize = 40;
+/// Max symbol rows.
+const MAX_SYMBOLS: usize = 80;
+/// Max evidence rows.
+const MAX_EVIDENCE: usize = 80;
+/// Max risk rows.
+const MAX_RISKS: usize = 20;
+/// Max next-read rows.
+const MAX_NEXT_READS: usize = 20;
+/// Max model string chars.
+const MAX_MODEL_STRING_CHARS: usize = 1200;
+/// Truncation tail.
+const TRUNCATION_MARKER: &str = " [truncated]";
+/// Cap notice field order.
+const CAP_FIELD_ORDER: [&str; 5] = ["files", "symbols", "evidence", "risks", "next_reads"];
+/// Truncation notice field order.
+const TRUNCATION_FIELD_ORDER: [&str; 6] = [
+    "answer.summary",
+    "files.reason",
+    "symbols.relevance",
+    "evidence.note",
+    "risks.message",
+    "next_reads.reason",
+];
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// Ask command output.
@@ -74,7 +102,31 @@ struct RawAskOutput {
 
 impl AskOutput {
     /// Add fixed fields, normalize order.
-    fn from_raw(value: RawAskOutput, metadata: CommandMetadata) -> Self {
+    fn from_raw(mut value: RawAskOutput, metadata: CommandMetadata) -> Self {
+        let mut notes = NormalizationNotes::default();
+
+        value.answer.normalize(&mut notes);
+        value
+            .files
+            .iter_mut()
+            .for_each(|file| file.normalize(&mut notes));
+        value
+            .symbols
+            .iter_mut()
+            .for_each(|symbol| symbol.normalize(&mut notes));
+        value
+            .evidence
+            .iter_mut()
+            .for_each(|evidence| evidence.normalize(&mut notes));
+        value
+            .risks
+            .iter_mut()
+            .for_each(|risk| risk.normalize(&mut notes));
+        value
+            .next_reads
+            .iter_mut()
+            .for_each(|next_read| next_read.normalize(&mut notes));
+
         let mut files = value.files;
         let mut symbols = value.symbols;
         let mut evidence = value.evidence;
@@ -83,14 +135,28 @@ impl AskOutput {
 
         files.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         files.dedup();
+        cap_rows(&mut files, "files", MAX_FILES, &mut notes);
         symbols.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         symbols.dedup();
+        cap_rows(&mut symbols, "symbols", MAX_SYMBOLS, &mut notes);
         evidence.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         evidence.dedup();
-        risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
-        risks.dedup();
+        cap_rows(&mut evidence, "evidence", MAX_EVIDENCE, &mut notes);
         next_reads.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         next_reads.dedup();
+        cap_rows(&mut next_reads, "next_reads", MAX_NEXT_READS, &mut notes);
+
+        risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        risks.dedup();
+        if risks.len() + notes.notice_count() > MAX_RISKS {
+            let risk_keep =
+                MAX_RISKS.saturating_sub(notes.notice_count() + usize::from(!notes.has_caps()));
+            notes.note_risk_cap(risks.len(), risk_keep);
+            risks.truncate(risk_keep);
+        }
+        risks.extend(notes.into_risks());
+        risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        risks.dedup();
 
         Self {
             schema_version: SCHEMA_VERSION,
@@ -119,6 +185,13 @@ pub(crate) struct AskAnswer {
     not_found: bool,
 }
 
+impl AskAnswer {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.summary, "answer.summary", notes);
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 /// One file evidence row.
 struct AskFile {
@@ -133,6 +206,11 @@ struct AskFile {
 }
 
 impl AskFile {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.reason, "files.reason", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, u8, &str, usize) {
         (
@@ -158,6 +236,11 @@ struct AskSymbol {
 }
 
 impl AskSymbol {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.relevance, "symbols.relevance", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str, &str, &str) {
         (
@@ -181,6 +264,11 @@ struct AskEvidence {
 }
 
 impl AskEvidence {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.note, "evidence.note", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str, &str) {
         (self.path.as_str(), self.symbol.as_str(), self.note.as_str())
@@ -197,6 +285,19 @@ struct AskRisk {
 }
 
 impl AskRisk {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.message, "risks.message", notes);
+    }
+
+    /// Build output notice row.
+    fn output_notice(message: String) -> Self {
+        Self {
+            kind: AskRiskKind::Unknown,
+            message,
+        }
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str) {
         (self.kind.as_str(), self.message.as_str())
@@ -213,6 +314,11 @@ struct AskNextRead {
 }
 
 impl AskNextRead {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.reason, "next_reads.reason", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str) {
         (self.path.as_str(), self.reason.as_str())
@@ -310,6 +416,112 @@ impl AskRiskKind {
             Self::Unknown => "unknown",
         }
     }
+}
+
+/// Output change notes.
+#[derive(Default)]
+struct NormalizationNotes {
+    /// Cap messages by field.
+    caps: BTreeMap<&'static str, String>,
+    /// Truncation counts by field.
+    truncations: BTreeMap<&'static str, usize>,
+}
+
+impl NormalizationNotes {
+    /// True when cap notice row needed.
+    fn has_caps(&self) -> bool {
+        !self.caps.is_empty()
+    }
+
+    /// Count injected notice rows.
+    fn notice_count(&self) -> usize {
+        usize::from(self.has_caps()) + usize::from(!self.truncations.is_empty())
+    }
+
+    /// Record capped array.
+    fn note_cap(&mut self, field: &'static str, before: usize, after: usize) {
+        if before > after {
+            self.caps
+                .insert(field, format!("{field} {before}->{after}"));
+        }
+    }
+
+    /// Record capped risk rows.
+    fn note_risk_cap(&mut self, before: usize, kept: usize) {
+        if before > kept {
+            self.caps
+                .insert("risks", format!("risks kept {kept} of {before} model rows"));
+        }
+    }
+
+    /// Record truncated string.
+    fn note_truncation(&mut self, field: &'static str) {
+        *self.truncations.entry(field).or_default() += 1;
+    }
+
+    /// Build output notice rows.
+    fn into_risks(self) -> Vec<AskRisk> {
+        let mut risks = Vec::new();
+
+        if !self.caps.is_empty() {
+            let capped_fields = CAP_FIELD_ORDER
+                .iter()
+                .filter_map(|field| self.caps.get(field))
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            risks.push(AskRisk::output_notice(format!(
+                "Output capped: {capped_fields}."
+            )));
+        }
+
+        if !self.truncations.is_empty() {
+            let truncated_fields = TRUNCATION_FIELD_ORDER
+                .iter()
+                .filter_map(|field| {
+                    self.truncations
+                        .get(field)
+                        .map(|count| format!("{field} x{count}"))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            risks.push(AskRisk::output_notice(format!(
+                "Output truncated at {MAX_MODEL_STRING_CHARS} chars: {truncated_fields}."
+            )));
+        }
+
+        risks
+    }
+}
+
+/// Cap row count, note drop.
+fn cap_rows<T>(rows: &mut Vec<T>, field: &'static str, cap: usize, notes: &mut NormalizationNotes) {
+    let before = rows.len();
+    if before > cap {
+        rows.truncate(cap);
+        notes.note_cap(field, before, cap);
+    }
+}
+
+/// Truncate long model string.
+fn truncate_model_string(value: &mut String, field: &'static str, notes: &mut NormalizationNotes) {
+    if truncate_string(value) {
+        notes.note_truncation(field);
+    }
+}
+
+/// Truncate string at char limit.
+fn truncate_string(value: &mut String) -> bool {
+    let value_chars = value.chars().count();
+    if value_chars <= MAX_MODEL_STRING_CHARS {
+        return false;
+    }
+
+    let keep_chars = MAX_MODEL_STRING_CHARS - TRUNCATION_MARKER.chars().count();
+    let mut truncated = value.chars().take(keep_chars).collect::<String>();
+    truncated.push_str(TRUNCATION_MARKER);
+    *value = truncated;
+    true
 }
 
 /// Parse ask output JSON.
@@ -680,6 +892,78 @@ mod tests {
     }
 
     #[test]
+    fn parsed_output_caps_arrays_and_injects_cap_risk() {
+        let output =
+            parse_ask_output(&capped_model_json(), metadata()).expect("output should parse");
+
+        assert_eq!(output.files.len(), 40);
+        assert_eq!(output.symbols.len(), 80);
+        assert_eq!(output.evidence.len(), 80);
+        assert_eq!(output.risks.len(), 20);
+        assert_eq!(output.next_reads.len(), 20);
+        assert!(output.risks.iter().any(|risk| {
+            risk == &super::AskRisk {
+                kind: super::AskRiskKind::Unknown,
+                message: "Output capped: files 45->40, symbols 85->80, evidence 85->80, risks kept 19 of 25 model rows, next_reads 25->20.".to_string(),
+            }
+        }));
+    }
+
+    #[test]
+    fn serialized_json_truncates_long_strings_and_injects_truncation_risk() {
+        let output =
+            parse_ask_output(&truncated_model_json(), metadata()).expect("output should parse");
+        let value = serde_json::from_str::<serde_json::Value>(
+            &output.into_json().expect("output should serialize"),
+        )
+        .expect("json should parse");
+
+        assert_eq!(
+            value["answer"]["summary"]
+                .as_str()
+                .map(|summary| summary.chars().count()),
+            Some(1200)
+        );
+        assert!(
+            value["answer"]["summary"]
+                .as_str()
+                .is_some_and(|summary| summary.ends_with(" [truncated]"))
+        );
+        assert!(
+            value["files"][0]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.ends_with(" [truncated]"))
+        );
+        assert!(
+            value["symbols"][0]["relevance"]
+                .as_str()
+                .is_some_and(|relevance| relevance.ends_with(" [truncated]"))
+        );
+        assert!(
+            value["evidence"][0]["note"]
+                .as_str()
+                .is_some_and(|note| note.ends_with(" [truncated]"))
+        );
+        assert!(
+            value["risks"][0]["message"]
+                .as_str()
+                .is_some_and(|message| message.ends_with(" [truncated]"))
+        );
+        assert!(
+            value["next_reads"][0]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.ends_with(" [truncated]"))
+        );
+        assert_eq!(
+            value["risks"][1],
+            json!({
+                "kind": "unknown",
+                "message": "Output truncated at 1200 chars: answer.summary x1, files.reason x1, symbols.relevance x1, evidence.note x1, risks.message x1, next_reads.reason x1."
+            })
+        );
+    }
+
+    #[test]
     fn bad_enum_value_maps_to_response_parse_failed() {
         let error = parse_ask_output(
             r#"{
@@ -857,6 +1141,122 @@ mod tests {
             ]
         })
         .to_string()
+    }
+
+    fn capped_model_json() -> String {
+        let files = (0..45)
+            .map(|index| {
+                json!({
+                    "path": format!("src/file-{index:02}.rs"),
+                    "included": true,
+                    "reason": format!("Reason {index:02}."),
+                    "bytes": index + 1
+                })
+            })
+            .collect::<Vec<_>>();
+        let symbols = (0..85)
+            .map(|index| {
+                json!({
+                    "name": format!("symbol_{index:02}"),
+                    "kind": "function",
+                    "path": format!("src/file-{:02}.rs", index % 45),
+                    "relevance": format!("Relevance {index:02}.")
+                })
+            })
+            .collect::<Vec<_>>();
+        let evidence = (0..85)
+            .map(|index| {
+                json!({
+                    "path": format!("src/file-{:02}.rs", index % 45),
+                    "symbol": format!("symbol_{index:02}"),
+                    "note": format!("Evidence {index:02}.")
+                })
+            })
+            .collect::<Vec<_>>();
+        let risks = (0..25)
+            .map(|index| {
+                json!({
+                    "kind": "missing_context",
+                    "message": format!("Risk {index:02}.")
+                })
+            })
+            .collect::<Vec<_>>();
+        let next_reads = (0..25)
+            .map(|index| {
+                json!({
+                    "path": format!("src/next-{index:02}.rs"),
+                    "reason": format!("Next read {index:02}.")
+                })
+            })
+            .collect::<Vec<_>>();
+
+        json!({
+            "question": "What matters?",
+            "answer": {
+                "summary": "Small answer.",
+                "confidence": "medium",
+                "not_found": false
+            },
+            "files": files,
+            "symbols": symbols,
+            "evidence": evidence,
+            "risks": risks,
+            "next_reads": next_reads
+        })
+        .to_string()
+    }
+
+    fn truncated_model_json() -> String {
+        let long_text = long_string(1300);
+
+        json!({
+            "question": "What matters?",
+            "answer": {
+                "summary": long_text,
+                "confidence": "high",
+                "not_found": false
+            },
+            "files": [
+                {
+                    "path": "src/auth.rs",
+                    "included": true,
+                    "reason": long_string(1301),
+                    "bytes": 10
+                }
+            ],
+            "symbols": [
+                {
+                    "name": "authenticate",
+                    "kind": "function",
+                    "path": "src/auth.rs",
+                    "relevance": long_string(1302)
+                }
+            ],
+            "evidence": [
+                {
+                    "path": "src/auth.rs",
+                    "symbol": "authenticate",
+                    "note": long_string(1303)
+                }
+            ],
+            "risks": [
+                {
+                    "kind": "missing_context",
+                    "message": long_string(1304)
+                }
+            ],
+            "next_reads": [
+                {
+                    "path": "src/auth/tests.rs",
+                    "reason": long_string(1305)
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn long_string(len: usize) -> String {
+        "x".repeat(len)
     }
 
     fn metadata() -> CommandMetadata {
