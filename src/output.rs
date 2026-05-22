@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 /// Ask output parse.
 mod ask;
 /// Doctor output parse.
@@ -23,6 +25,39 @@ const LOCATE_COMMAND: &str = "locate";
 const STATUS_OK: &str = "ok";
 /// Error status tag.
 const STATUS_ERROR: &str = "error";
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+/// CLI-owned command metadata.
+pub(crate) struct CommandMetadata {
+    /// Input byte count.
+    input_bytes: usize,
+    /// Final JSON byte count.
+    output_bytes: usize,
+    /// Model time in ms.
+    duration_ms: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Input to output ratio.
+    compression_ratio: Option<String>,
+}
+
+impl CommandMetadata {
+    /// Build metadata before final JSON size known.
+    pub(crate) fn new(input_bytes: usize, duration_ms: usize) -> Self {
+        Self {
+            input_bytes,
+            output_bytes: 0,
+            duration_ms,
+            compression_ratio: None,
+        }
+    }
+
+    /// Update final JSON byte count.
+    fn set_output_bytes(&mut self, output_bytes: usize) {
+        self.output_bytes = output_bytes;
+        self.compression_ratio = (output_bytes > 0 && self.input_bytes > output_bytes)
+            .then(|| format!("{:.2}", self.input_bytes as f64 / output_bytes as f64));
+    }
+}
 /// Codex init rules block.
 const CODEX_INIT_RULES: &str = r#"# cowork rules for Codex
 

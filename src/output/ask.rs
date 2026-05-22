@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-use super::{ASK_COMMAND, SCHEMA_VERSION, STATUS_OK};
+use super::{ASK_COMMAND, CommandMetadata, SCHEMA_VERSION, STATUS_OK};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// Ask command output.
@@ -28,7 +28,7 @@ pub(crate) struct AskOutput {
     /// Suggested next reads.
     next_reads: Vec<AskNextRead>,
     /// Output metadata.
-    metadata: AskMetadata,
+    metadata: CommandMetadata,
 }
 
 impl AskOutput {
@@ -37,10 +37,19 @@ impl AskOutput {
     /// # Errors
     ///
     /// Returns [`AppError`] when JSON serialization fails.
-    pub(crate) fn to_json(&self) -> Result<String, AppError> {
-        serde_json::to_string(self).map_err(|error| {
-            AppError::response_parse_failed(format!("failed to serialize ask output: {error}"))
-        })
+    pub(crate) fn into_json(mut self) -> Result<String, AppError> {
+        loop {
+            let json = serde_json::to_string(&self).map_err(|error| {
+                AppError::response_parse_failed(format!("failed to serialize ask output: {error}"))
+            })?;
+            let output_bytes = json.len();
+
+            if self.metadata.output_bytes == output_bytes {
+                return Ok(json);
+            }
+
+            self.metadata.set_output_bytes(output_bytes);
+        }
     }
 }
 
@@ -61,13 +70,11 @@ struct RawAskOutput {
     risks: Vec<AskRisk>,
     /// Suggested next reads.
     next_reads: Vec<AskNextRead>,
-    /// Output metadata.
-    metadata: AskMetadata,
 }
 
-impl From<RawAskOutput> for AskOutput {
+impl AskOutput {
     /// Add fixed top-level fields.
-    fn from(value: RawAskOutput) -> Self {
+    fn from_raw(value: RawAskOutput, metadata: CommandMetadata) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             command: ASK_COMMAND,
@@ -79,7 +86,7 @@ impl From<RawAskOutput> for AskOutput {
             evidence: value.evidence,
             risks: value.risks,
             next_reads: value.next_reads,
-            metadata: value.metadata,
+            metadata,
         }
     }
 }
@@ -151,15 +158,6 @@ struct AskNextRead {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-/// Ask output metadata.
-struct AskMetadata {
-    /// Input byte count.
-    input_bytes: usize,
-    /// Model time in ms.
-    duration_ms: usize,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Ask confidence level.
 enum AskConfidence {
@@ -224,9 +222,12 @@ enum AskRiskKind {
 /// # Errors
 ///
 /// Returns [`AppError`] when the JSON is invalid or required fields do not match schema.
-pub(crate) fn parse_ask_output(raw_json: &str) -> Result<AskOutput, AppError> {
+pub(crate) fn parse_ask_output(
+    raw_json: &str,
+    metadata: CommandMetadata,
+) -> Result<AskOutput, AppError> {
     serde_json::from_str::<RawAskOutput>(raw_json)
-        .map(AskOutput::from)
+        .map(|value| AskOutput::from_raw(value, metadata))
         .map_err(|error| {
             AppError::response_parse_failed(format!("failed to parse ask output: {error}"))
         })
@@ -240,11 +241,12 @@ mod tests {
     use serde_json::json;
 
     use super::parse_ask_output;
-    use crate::error::AppError;
+    use crate::{error::AppError, output::CommandMetadata};
 
     #[test]
     fn valid_model_json_parses_to_typed_success_output() {
-        let output = parse_ask_output(&valid_model_json()).expect("output should parse");
+        let output =
+            parse_ask_output(&valid_model_json(), metadata()).expect("output should parse");
 
         assert_eq!(output.question, "How does request authentication work?");
         assert_eq!(
@@ -257,15 +259,42 @@ mod tests {
         assert_eq!(output.risks.len(), 1);
         assert_eq!(output.next_reads.len(), 1);
         assert_eq!(output.metadata.input_bytes, 12420);
+        assert_eq!(output.metadata.duration_ms, 980);
+        assert_eq!(output.metadata.output_bytes, 0);
+    }
+
+    #[test]
+    fn serialized_json_uses_cli_owned_metadata() {
+        let output =
+            parse_ask_output(&valid_model_json(), metadata()).expect("output should parse");
+        let value = serde_json::from_str::<serde_json::Value>(
+            &output.into_json().expect("output should serialize"),
+        )
+        .expect("json should parse");
+
+        assert_eq!(value["metadata"]["input_bytes"], 12420);
+        assert_eq!(value["metadata"]["duration_ms"], 980);
+        assert!(value["metadata"]["output_bytes"].as_u64().unwrap_or(0) > 0);
+        assert!(
+            value["metadata"]["compression_ratio"]
+                .as_str()
+                .and_then(|ratio| ratio.parse::<f64>().ok())
+                .is_some_and(|ratio| ratio > 1.0)
+        );
     }
 
     #[test]
     fn serialized_json_keeps_fixed_top_level_fields() {
-        let output = parse_ask_output(&valid_model_json()).expect("output should parse");
-        let value = serde_json::from_str::<serde_json::Value>(
-            &output.to_json().expect("output should serialize"),
+        let output =
+            parse_ask_output(&valid_model_json(), metadata()).expect("output should parse");
+        let mut value = serde_json::from_str::<serde_json::Value>(
+            &output.into_json().expect("output should serialize"),
         )
         .expect("json should parse");
+        let metadata = value
+            .as_object_mut()
+            .and_then(|root| root.remove("metadata"))
+            .expect("metadata should exist");
 
         assert_eq!(
             value,
@@ -313,12 +342,18 @@ mod tests {
                         "path": "src/auth/tests.rs",
                         "reason": "Likely contains authentication edge cases."
                     }
-                ],
-                "metadata": {
-                    "input_bytes": 12420,
-                    "duration_ms": 980
-                }
+                ]
             })
+        );
+
+        assert_eq!(metadata["input_bytes"], 12420);
+        assert_eq!(metadata["duration_ms"], 980);
+        assert!(metadata["output_bytes"].as_u64().unwrap_or(0) > 0);
+        assert!(
+            metadata["compression_ratio"]
+                .as_str()
+                .and_then(|ratio| ratio.parse::<f64>().ok())
+                .is_some_and(|ratio| ratio > 1.0)
         );
     }
 
@@ -331,9 +366,9 @@ mod tests {
                 "files":[],
                 "symbols":[],
                 "evidence":[],
-                "risks":[],
-                "metadata":{"input_bytes":1,"duration_ms":2}
+                "risks":[]
             }"#,
+            metadata(),
         )
         .expect_err("parse should fail");
 
@@ -350,9 +385,9 @@ mod tests {
                 "symbols":[],
                 "evidence":[],
                 "risks":[],
-                "next_reads":[],
-                "metadata":{"input_bytes":1,"duration_ms":2}
+                "next_reads":[]
             }"#,
+            metadata(),
         )
         .expect_err("parse should fail");
 
@@ -401,12 +436,12 @@ mod tests {
                     "path": "src/auth/tests.rs",
                     "reason": "Likely contains authentication edge cases."
                 }
-            ],
-            "metadata": {
-                "input_bytes": 12420,
-                "duration_ms": 980
-            }
+            ]
         })
         .to_string()
+    }
+
+    fn metadata() -> CommandMetadata {
+        CommandMetadata::new(12420, 980)
     }
 }
