@@ -1,8 +1,36 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
 use super::{ASK_COMMAND, CommandMetadata, SCHEMA_VERSION, STATUS_OK};
+
+/// Max file rows.
+const MAX_FILES: usize = 40;
+/// Max symbol rows.
+const MAX_SYMBOLS: usize = 80;
+/// Max evidence rows.
+const MAX_EVIDENCE: usize = 80;
+/// Max risk rows.
+const MAX_RISKS: usize = 20;
+/// Max next-read rows.
+const MAX_NEXT_READS: usize = 20;
+/// Max model string chars.
+const MAX_MODEL_STRING_CHARS: usize = 1200;
+/// Truncation tail.
+const TRUNCATION_MARKER: &str = " [truncated]";
+/// Cap notice field order.
+const CAP_FIELD_ORDER: [&str; 5] = ["files", "symbols", "evidence", "risks", "next_reads"];
+/// Truncation notice field order.
+const TRUNCATION_FIELD_ORDER: [&str; 6] = [
+    "answer.summary",
+    "files.reason",
+    "symbols.relevance",
+    "evidence.note",
+    "risks.message",
+    "next_reads.reason",
+];
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// Ask command output.
@@ -74,7 +102,31 @@ struct RawAskOutput {
 
 impl AskOutput {
     /// Add fixed fields, normalize order.
-    fn from_raw(value: RawAskOutput, metadata: CommandMetadata) -> Self {
+    fn from_raw(mut value: RawAskOutput, metadata: CommandMetadata) -> Self {
+        let mut notes = NormalizationNotes::default();
+
+        value.answer.normalize(&mut notes);
+        value
+            .files
+            .iter_mut()
+            .for_each(|file| file.normalize(&mut notes));
+        value
+            .symbols
+            .iter_mut()
+            .for_each(|symbol| symbol.normalize(&mut notes));
+        value
+            .evidence
+            .iter_mut()
+            .for_each(|evidence| evidence.normalize(&mut notes));
+        value
+            .risks
+            .iter_mut()
+            .for_each(|risk| risk.normalize(&mut notes));
+        value
+            .next_reads
+            .iter_mut()
+            .for_each(|next_read| next_read.normalize(&mut notes));
+
         let mut files = value.files;
         let mut symbols = value.symbols;
         let mut evidence = value.evidence;
@@ -83,14 +135,28 @@ impl AskOutput {
 
         files.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         files.dedup();
+        cap_rows(&mut files, "files", MAX_FILES, &mut notes);
         symbols.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         symbols.dedup();
+        cap_rows(&mut symbols, "symbols", MAX_SYMBOLS, &mut notes);
         evidence.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         evidence.dedup();
-        risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
-        risks.dedup();
+        cap_rows(&mut evidence, "evidence", MAX_EVIDENCE, &mut notes);
         next_reads.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         next_reads.dedup();
+        cap_rows(&mut next_reads, "next_reads", MAX_NEXT_READS, &mut notes);
+
+        risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        risks.dedup();
+        if risks.len() + notes.notice_count() > MAX_RISKS {
+            let risk_keep =
+                MAX_RISKS.saturating_sub(notes.notice_count() + usize::from(!notes.has_caps()));
+            notes.note_risk_cap(risks.len(), risk_keep);
+            risks.truncate(risk_keep);
+        }
+        risks.extend(notes.into_risks());
+        risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        risks.dedup();
 
         Self {
             schema_version: SCHEMA_VERSION,
@@ -119,6 +185,13 @@ pub(crate) struct AskAnswer {
     not_found: bool,
 }
 
+impl AskAnswer {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.summary, "answer.summary", notes);
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 /// One file evidence row.
 struct AskFile {
@@ -133,6 +206,11 @@ struct AskFile {
 }
 
 impl AskFile {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.reason, "files.reason", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, u8, &str, usize) {
         (
@@ -158,6 +236,11 @@ struct AskSymbol {
 }
 
 impl AskSymbol {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.relevance, "symbols.relevance", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str, &str, &str) {
         (
@@ -181,6 +264,11 @@ struct AskEvidence {
 }
 
 impl AskEvidence {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.note, "evidence.note", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str, &str) {
         (self.path.as_str(), self.symbol.as_str(), self.note.as_str())
@@ -197,6 +285,19 @@ struct AskRisk {
 }
 
 impl AskRisk {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.message, "risks.message", notes);
+    }
+
+    /// Build output notice row.
+    fn output_notice(message: String) -> Self {
+        Self {
+            kind: AskRiskKind::Unknown,
+            message,
+        }
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str) {
         (self.kind.as_str(), self.message.as_str())
@@ -213,6 +314,11 @@ struct AskNextRead {
 }
 
 impl AskNextRead {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.reason, "next_reads.reason", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str) {
         (self.path.as_str(), self.reason.as_str())
@@ -312,6 +418,112 @@ impl AskRiskKind {
     }
 }
 
+/// Output change notes.
+#[derive(Default)]
+struct NormalizationNotes {
+    /// Cap messages by field.
+    caps: BTreeMap<&'static str, String>,
+    /// Truncation counts by field.
+    truncations: BTreeMap<&'static str, usize>,
+}
+
+impl NormalizationNotes {
+    /// True when cap notice row needed.
+    fn has_caps(&self) -> bool {
+        !self.caps.is_empty()
+    }
+
+    /// Count injected notice rows.
+    fn notice_count(&self) -> usize {
+        usize::from(self.has_caps()) + usize::from(!self.truncations.is_empty())
+    }
+
+    /// Record capped array.
+    fn note_cap(&mut self, field: &'static str, before: usize, after: usize) {
+        if before > after {
+            self.caps
+                .insert(field, format!("{field} {before}->{after}"));
+        }
+    }
+
+    /// Record capped risk rows.
+    fn note_risk_cap(&mut self, before: usize, kept: usize) {
+        if before > kept {
+            self.caps
+                .insert("risks", format!("risks kept {kept} of {before} model rows"));
+        }
+    }
+
+    /// Record truncated string.
+    fn note_truncation(&mut self, field: &'static str) {
+        *self.truncations.entry(field).or_default() += 1;
+    }
+
+    /// Build output notice rows.
+    fn into_risks(self) -> Vec<AskRisk> {
+        let mut risks = Vec::new();
+
+        if !self.caps.is_empty() {
+            let capped_fields = CAP_FIELD_ORDER
+                .iter()
+                .filter_map(|field| self.caps.get(field))
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            risks.push(AskRisk::output_notice(format!(
+                "Output capped: {capped_fields}."
+            )));
+        }
+
+        if !self.truncations.is_empty() {
+            let truncated_fields = TRUNCATION_FIELD_ORDER
+                .iter()
+                .filter_map(|field| {
+                    self.truncations
+                        .get(field)
+                        .map(|count| format!("{field} x{count}"))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            risks.push(AskRisk::output_notice(format!(
+                "Output truncated at {MAX_MODEL_STRING_CHARS} chars: {truncated_fields}."
+            )));
+        }
+
+        risks
+    }
+}
+
+/// Cap row count, note drop.
+fn cap_rows<T>(rows: &mut Vec<T>, field: &'static str, cap: usize, notes: &mut NormalizationNotes) {
+    let before = rows.len();
+    if before > cap {
+        rows.truncate(cap);
+        notes.note_cap(field, before, cap);
+    }
+}
+
+/// Truncate long model string.
+fn truncate_model_string(value: &mut String, field: &'static str, notes: &mut NormalizationNotes) {
+    if truncate_string(value) {
+        notes.note_truncation(field);
+    }
+}
+
+/// Truncate string at char limit.
+fn truncate_string(value: &mut String) -> bool {
+    let value_chars = value.chars().count();
+    if value_chars <= MAX_MODEL_STRING_CHARS {
+        return false;
+    }
+
+    let keep_chars = MAX_MODEL_STRING_CHARS - TRUNCATION_MARKER.chars().count();
+    let mut truncated = value.chars().take(keep_chars).collect::<String>();
+    truncated.push_str(TRUNCATION_MARKER);
+    *value = truncated;
+    true
+}
+
 /// Parse ask output JSON.
 ///
 /// # Errors
@@ -329,537 +541,4 @@ pub(crate) fn parse_ask_output(
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::missing_errors_doc, reason = "test helpers stay local")]
-    #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
-
-    use serde_json::json;
-
-    use super::parse_ask_output;
-    use crate::{error::AppError, output::CommandMetadata};
-
-    #[test]
-    fn valid_model_json_parses_to_typed_success_output() {
-        let output =
-            parse_ask_output(&valid_model_json(), metadata()).expect("output should parse");
-
-        assert_eq!(output.question, "How does request authentication work?");
-        assert_eq!(
-            output.answer.summary,
-            "Authentication is enforced in middleware."
-        );
-        assert_eq!(output.files.len(), 1);
-        assert_eq!(output.symbols.len(), 1);
-        assert_eq!(output.evidence.len(), 1);
-        assert_eq!(output.risks.len(), 1);
-        assert_eq!(output.next_reads.len(), 1);
-        assert_eq!(output.metadata.input_bytes, 12420);
-        assert_eq!(output.metadata.duration_ms, 980);
-        assert_eq!(output.metadata.output_bytes, 0);
-    }
-
-    #[test]
-    fn parsed_output_sorts_and_dedupes_rows() {
-        let output = parse_ask_output(&unsorted_duplicate_model_json(), metadata())
-            .expect("output should parse");
-
-        assert_eq!(
-            serde_json::to_value(&output.files).expect("files should serialize"),
-            json!([
-                {
-                    "path": "src/a.rs",
-                    "included": true,
-                    "reason": "Contains auth flow.",
-                    "bytes": 10
-                },
-                {
-                    "path": "src/a.rs",
-                    "included": true,
-                    "reason": "Contains auth flow.",
-                    "bytes": 30
-                },
-                {
-                    "path": "src/z.rs",
-                    "included": false,
-                    "reason": "Skipped binary snapshot.",
-                    "bytes": 12
-                }
-            ])
-        );
-        assert_eq!(
-            serde_json::to_value(&output.symbols).expect("symbols should serialize"),
-            json!([
-                {
-                    "name": "AuthState",
-                    "kind": "type",
-                    "path": "src/a.rs",
-                    "relevance": "Owns auth state."
-                },
-                {
-                    "name": "authenticate",
-                    "kind": "function",
-                    "path": "src/a.rs",
-                    "relevance": "Runs auth checks."
-                },
-                {
-                    "name": "snapshot_auth",
-                    "kind": "function",
-                    "path": "src/z.rs",
-                    "relevance": "Exports auth snapshot."
-                }
-            ])
-        );
-        assert_eq!(
-            serde_json::to_value(&output.evidence).expect("evidence should serialize"),
-            json!([
-                {
-                    "path": "src/a.rs",
-                    "symbol": "AuthState",
-                    "note": "Holds request auth state."
-                },
-                {
-                    "path": "src/a.rs",
-                    "symbol": "authenticate",
-                    "note": "Rejects bad tokens."
-                },
-                {
-                    "path": "src/z.rs",
-                    "symbol": "snapshot_auth",
-                    "note": "Writes auth snapshot."
-                }
-            ])
-        );
-        assert_eq!(
-            serde_json::to_value(&output.risks).expect("risks should serialize"),
-            json!([
-                {
-                    "kind": "missing_context",
-                    "message": "Tests missing."
-                },
-                {
-                    "kind": "unsupported_file",
-                    "message": "Binary snapshot skipped."
-                }
-            ])
-        );
-        assert_eq!(
-            serde_json::to_value(&output.next_reads).expect("next reads should serialize"),
-            json!([
-                {
-                    "path": "src/a/tests.rs",
-                    "reason": "Likely covers auth edges."
-                },
-                {
-                    "path": "src/z/tests.rs",
-                    "reason": "Likely covers snapshot edges."
-                }
-            ])
-        );
-    }
-
-    #[test]
-    fn serialized_json_uses_cli_owned_metadata() {
-        let output =
-            parse_ask_output(&valid_model_json(), metadata()).expect("output should parse");
-        let value = serde_json::from_str::<serde_json::Value>(
-            &output.into_json().expect("output should serialize"),
-        )
-        .expect("json should parse");
-
-        assert_eq!(value["metadata"]["input_bytes"], 12420);
-        assert_eq!(value["metadata"]["duration_ms"], 980);
-        assert!(value["metadata"]["output_bytes"].as_u64().unwrap_or(0) > 0);
-        assert!(
-            value["metadata"]["compression_ratio"]
-                .as_str()
-                .and_then(|ratio| ratio.parse::<f64>().ok())
-                .is_some_and(|ratio| ratio > 1.0)
-        );
-    }
-
-    #[test]
-    fn serialized_json_normalizes_row_order_and_dedupes() {
-        let output = parse_ask_output(&unsorted_duplicate_model_json(), metadata())
-            .expect("output should parse");
-        let mut value = serde_json::from_str::<serde_json::Value>(
-            &output.into_json().expect("output should serialize"),
-        )
-        .expect("json should parse");
-        let metadata = value
-            .as_object_mut()
-            .and_then(|root| root.remove("metadata"))
-            .expect("metadata should exist");
-
-        assert_eq!(
-            value,
-            json!({
-                "schema_version": "1.0",
-                "command": "ask",
-                "status": "ok",
-                "question": "Where does auth state live?",
-                "answer": {
-                    "summary": "Auth state lives in src/a.rs.",
-                    "confidence": "medium",
-                    "not_found": false
-                },
-                "files": [
-                    {
-                        "path": "src/a.rs",
-                        "included": true,
-                        "reason": "Contains auth flow.",
-                        "bytes": 10
-                    },
-                    {
-                        "path": "src/a.rs",
-                        "included": true,
-                        "reason": "Contains auth flow.",
-                        "bytes": 30
-                    },
-                    {
-                        "path": "src/z.rs",
-                        "included": false,
-                        "reason": "Skipped binary snapshot.",
-                        "bytes": 12
-                    }
-                ],
-                "symbols": [
-                    {
-                        "name": "AuthState",
-                        "kind": "type",
-                        "path": "src/a.rs",
-                        "relevance": "Owns auth state."
-                    },
-                    {
-                        "name": "authenticate",
-                        "kind": "function",
-                        "path": "src/a.rs",
-                        "relevance": "Runs auth checks."
-                    },
-                    {
-                        "name": "snapshot_auth",
-                        "kind": "function",
-                        "path": "src/z.rs",
-                        "relevance": "Exports auth snapshot."
-                    }
-                ],
-                "evidence": [
-                    {
-                        "path": "src/a.rs",
-                        "symbol": "AuthState",
-                        "note": "Holds request auth state."
-                    },
-                    {
-                        "path": "src/a.rs",
-                        "symbol": "authenticate",
-                        "note": "Rejects bad tokens."
-                    },
-                    {
-                        "path": "src/z.rs",
-                        "symbol": "snapshot_auth",
-                        "note": "Writes auth snapshot."
-                    }
-                ],
-                "risks": [
-                    {
-                        "kind": "missing_context",
-                        "message": "Tests missing."
-                    },
-                    {
-                        "kind": "unsupported_file",
-                        "message": "Binary snapshot skipped."
-                    }
-                ],
-                "next_reads": [
-                    {
-                        "path": "src/a/tests.rs",
-                        "reason": "Likely covers auth edges."
-                    },
-                    {
-                        "path": "src/z/tests.rs",
-                        "reason": "Likely covers snapshot edges."
-                    }
-                ]
-            })
-        );
-
-        assert_eq!(metadata["input_bytes"], 12420);
-        assert_eq!(metadata["duration_ms"], 980);
-        assert!(metadata["output_bytes"].as_u64().unwrap_or(0) > 0);
-    }
-
-    #[test]
-    fn serialized_json_keeps_fixed_top_level_fields() {
-        let output =
-            parse_ask_output(&valid_model_json(), metadata()).expect("output should parse");
-        let mut value = serde_json::from_str::<serde_json::Value>(
-            &output.into_json().expect("output should serialize"),
-        )
-        .expect("json should parse");
-        let metadata = value
-            .as_object_mut()
-            .and_then(|root| root.remove("metadata"))
-            .expect("metadata should exist");
-
-        assert_eq!(
-            value,
-            json!({
-                "schema_version": "1.0",
-                "command": "ask",
-                "status": "ok",
-                "question": "How does request authentication work?",
-                "answer": {
-                    "summary": "Authentication is enforced in middleware.",
-                    "confidence": "high",
-                    "not_found": false
-                },
-                "files": [
-                    {
-                        "path": "src/auth/middleware.rs",
-                        "included": true,
-                        "reason": "Contains authentication middleware.",
-                        "bytes": 12420
-                    }
-                ],
-                "symbols": [
-                    {
-                        "name": "authenticate_request",
-                        "kind": "function",
-                        "path": "src/auth/middleware.rs",
-                        "relevance": "Validates credentials and attaches user context."
-                    }
-                ],
-                "evidence": [
-                    {
-                        "path": "src/auth/middleware.rs",
-                        "symbol": "authenticate_request",
-                        "note": "Requests without valid credentials return early."
-                    }
-                ],
-                "risks": [
-                    {
-                        "kind": "missing_context",
-                        "message": "Tests were not provided."
-                    }
-                ],
-                "next_reads": [
-                    {
-                        "path": "src/auth/tests.rs",
-                        "reason": "Likely contains authentication edge cases."
-                    }
-                ]
-            })
-        );
-
-        assert_eq!(metadata["input_bytes"], 12420);
-        assert_eq!(metadata["duration_ms"], 980);
-        assert!(metadata["output_bytes"].as_u64().unwrap_or(0) > 0);
-        assert!(
-            metadata["compression_ratio"]
-                .as_str()
-                .and_then(|ratio| ratio.parse::<f64>().ok())
-                .is_some_and(|ratio| ratio > 1.0)
-        );
-    }
-
-    #[test]
-    fn missing_required_field_maps_to_response_parse_failed() {
-        let error = parse_ask_output(
-            r#"{
-                "question":"q",
-                "answer":{"summary":"s","confidence":"high","not_found":false},
-                "files":[],
-                "symbols":[],
-                "evidence":[],
-                "risks":[]
-            }"#,
-            metadata(),
-        )
-        .expect_err("parse should fail");
-
-        assert!(matches!(error, AppError::ResponseParseFailed { .. }));
-    }
-
-    #[test]
-    fn bad_enum_value_maps_to_response_parse_failed() {
-        let error = parse_ask_output(
-            r#"{
-                "question":"q",
-                "answer":{"summary":"s","confidence":"certain","not_found":false},
-                "files":[],
-                "symbols":[],
-                "evidence":[],
-                "risks":[],
-                "next_reads":[]
-            }"#,
-            metadata(),
-        )
-        .expect_err("parse should fail");
-
-        assert!(matches!(error, AppError::ResponseParseFailed { .. }));
-    }
-
-    fn valid_model_json() -> String {
-        json!({
-            "question": "How does request authentication work?",
-            "answer": {
-                "summary": "Authentication is enforced in middleware.",
-                "confidence": "high",
-                "not_found": false
-            },
-            "files": [
-                {
-                    "path": "src/auth/middleware.rs",
-                    "included": true,
-                    "reason": "Contains authentication middleware.",
-                    "bytes": 12420
-                }
-            ],
-            "symbols": [
-                {
-                    "name": "authenticate_request",
-                    "kind": "function",
-                    "path": "src/auth/middleware.rs",
-                    "relevance": "Validates credentials and attaches user context."
-                }
-            ],
-            "evidence": [
-                {
-                    "path": "src/auth/middleware.rs",
-                    "symbol": "authenticate_request",
-                    "note": "Requests without valid credentials return early."
-                }
-            ],
-            "risks": [
-                {
-                    "kind": "missing_context",
-                    "message": "Tests were not provided."
-                }
-            ],
-            "next_reads": [
-                {
-                    "path": "src/auth/tests.rs",
-                    "reason": "Likely contains authentication edge cases."
-                }
-            ]
-        })
-        .to_string()
-    }
-
-    fn unsorted_duplicate_model_json() -> String {
-        json!({
-            "question": "Where does auth state live?",
-            "answer": {
-                "summary": "Auth state lives in src/a.rs.",
-                "confidence": "medium",
-                "not_found": false
-            },
-            "files": [
-                {
-                    "path": "src/z.rs",
-                    "included": false,
-                    "reason": "Skipped binary snapshot.",
-                    "bytes": 12
-                },
-                {
-                    "path": "src/a.rs",
-                    "included": true,
-                    "reason": "Contains auth flow.",
-                    "bytes": 30
-                },
-                {
-                    "path": "src/a.rs",
-                    "included": true,
-                    "reason": "Contains auth flow.",
-                    "bytes": 10
-                },
-                {
-                    "path": "src/a.rs",
-                    "included": true,
-                    "reason": "Contains auth flow.",
-                    "bytes": 30
-                }
-            ],
-            "symbols": [
-                {
-                    "name": "snapshot_auth",
-                    "kind": "function",
-                    "path": "src/z.rs",
-                    "relevance": "Exports auth snapshot."
-                },
-                {
-                    "name": "authenticate",
-                    "kind": "function",
-                    "path": "src/a.rs",
-                    "relevance": "Runs auth checks."
-                },
-                {
-                    "name": "AuthState",
-                    "kind": "type",
-                    "path": "src/a.rs",
-                    "relevance": "Owns auth state."
-                },
-                {
-                    "name": "authenticate",
-                    "kind": "function",
-                    "path": "src/a.rs",
-                    "relevance": "Runs auth checks."
-                }
-            ],
-            "evidence": [
-                {
-                    "path": "src/z.rs",
-                    "symbol": "snapshot_auth",
-                    "note": "Writes auth snapshot."
-                },
-                {
-                    "path": "src/a.rs",
-                    "symbol": "authenticate",
-                    "note": "Rejects bad tokens."
-                },
-                {
-                    "path": "src/a.rs",
-                    "symbol": "AuthState",
-                    "note": "Holds request auth state."
-                },
-                {
-                    "path": "src/a.rs",
-                    "symbol": "authenticate",
-                    "note": "Rejects bad tokens."
-                }
-            ],
-            "risks": [
-                {
-                    "kind": "unsupported_file",
-                    "message": "Binary snapshot skipped."
-                },
-                {
-                    "kind": "missing_context",
-                    "message": "Tests missing."
-                },
-                {
-                    "kind": "missing_context",
-                    "message": "Tests missing."
-                }
-            ],
-            "next_reads": [
-                {
-                    "path": "src/z/tests.rs",
-                    "reason": "Likely covers snapshot edges."
-                },
-                {
-                    "path": "src/a/tests.rs",
-                    "reason": "Likely covers auth edges."
-                },
-                {
-                    "path": "src/a/tests.rs",
-                    "reason": "Likely covers auth edges."
-                }
-            ]
-        })
-        .to_string()
-    }
-
-    fn metadata() -> CommandMetadata {
-        CommandMetadata::new(12420, 980)
-    }
-}
+mod tests;
