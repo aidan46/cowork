@@ -77,6 +77,54 @@ cowork locate \
   --model your-model
 ```
 
+## Token-saving workflow
+
+Use `locate` to find likely files first. Use `brief` next when cloud agent needs compact repo context instead of raw file dumps.
+
+Find likely files:
+
+```bash
+cowork locate \
+  --paths src \
+  --recursive \
+  --thing "where config precedence is resolved" \
+  --model your-model
+```
+
+Check `files`, `symbols`, and `evidence`, then build compact handoff:
+
+```bash
+cowork brief \
+  --paths src/config.rs src/commands/ask.rs \
+  --goal "change config precedence safely" \
+  --model your-model
+```
+
+Command output is JSON on stdout only. Redirect if you want file:
+
+```bash
+cowork brief \
+  --paths src/config.rs src/commands/ask.rs \
+  --goal "change config precedence safely" \
+  --model your-model > brief.json
+```
+
+Cloud-agent handoff block:
+
+```txt
+Use attached `brief.json` as advisory repo context.
+Inspect cited `evidence` paths before edits.
+Treat local-model `summary`, `risks`, and conclusions as advisory.
+If context is thin or stale, read source files directly before changing code.
+```
+
+Notes:
+
+- `metadata.input_bytes` is byte count, not exact token count
+- inspect cited evidence before edits, not only model summary
+- `cowork` is for narrow repo questions, not whole-repo architecture sweeps
+- skip `cowork` when you already know exact files and need direct source reading or broad refactor validation
+
 If you use same model often, put it in config and drop `--model` from command:
 
 ```toml
@@ -148,7 +196,7 @@ Example success shape:
 
 ## Scope today
 
-- four subcommands: `doctor`, `ask`, `locate`, `init`
+- five subcommands: `doctor`, `ask`, `locate`, `brief`, `init`
 - `init --print` prints short agent rules
 - `init --write` writes bounded managed blocks to `AGENTS.md` or `CLAUDE.md`
 - JSON stdout only, even on errors
@@ -159,4 +207,4 @@ Example success shape:
 
 - read [SUPPORT.md](SUPPORT.md) for usage questions and bug reports
 - read [CONTRIBUTING.md](CONTRIBUTING.md) before opening PR
-- use `cowork doctor --help`, `cowork ask --help`, `cowork locate --help`, and `cowork init --help` for current flag surface
+- use `cowork doctor --help`, `cowork ask --help`, `cowork locate --help`, `cowork brief --help`, and `cowork init --help` for current flag surface
