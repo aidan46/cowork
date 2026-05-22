@@ -19,11 +19,13 @@ mod output;
 /// Model prompt render.
 mod prompt;
 
-pub use cli::{AskArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitModeArgs, LocateArgs};
+pub use cli::{
+    AskArgs, BriefArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitModeArgs, LocateArgs,
+};
 pub use commands::run;
 
 #[cfg(test)]
-pub(crate) use commands::run_ask_json_in;
+pub(crate) use commands::{run_ask_json_in, run_brief_json_in};
 
 #[cfg(test)]
 mod tests {
@@ -41,7 +43,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{AskArgs, run_ask_json_in};
+    use super::{AskArgs, BriefArgs, run_ask_json_in, run_brief_json_in};
     use crate::error::AppError;
 
     #[test]
@@ -96,6 +98,28 @@ mod tests {
     }
 
     #[test]
+    fn brief_happy_path_returns_success_json() {
+        let dirs = test_dirs();
+        let content = "fn main() {}\n";
+        let file = write_temp_file(content);
+        let (host, handle) =
+            spawn_server(ok_response(&response_envelope(&valid_brief_model_json())));
+        let args = brief_args(vec![file], "trace CLI flow", Some("gemma3:12b"), Some(host));
+
+        let output =
+            run_brief_json_in(args, &dirs.project, Some(&dirs.home)).expect("brief should pass");
+        let value =
+            serde_json::from_str::<serde_json::Value>(&output).expect("output should be json");
+
+        handle.join().expect("server should join");
+        assert_eq!(value["command"], "brief");
+        assert_eq!(value["goal"], "trace CLI flow");
+        assert_eq!(value["metadata"]["input_bytes"], content.len());
+        assert!(value["metadata"]["duration_ms"].as_u64().is_some());
+        assert!(value["metadata"]["output_bytes"].as_u64().unwrap_or(0) > 0);
+    }
+
+    #[test]
     fn bad_model_json_maps_to_response_parse_failed() {
         let dirs = test_dirs();
         let file = write_temp_file("fn main() {}\n");
@@ -133,6 +157,25 @@ mod tests {
         AskArgs {
             paths,
             question: "What does this file do?".to_string(),
+            model: model.map(str::to_string),
+            host,
+            max_bytes: None,
+            recursive: false,
+            include: Vec::new(),
+            exclude: Vec::new(),
+            fail_on_missing: false,
+        }
+    }
+
+    fn brief_args(
+        paths: Vec<PathBuf>,
+        goal: &str,
+        model: Option<&str>,
+        host: Option<String>,
+    ) -> BriefArgs {
+        BriefArgs {
+            paths,
+            goal: goal.to_string(),
             model: model.map(str::to_string),
             host,
             max_bytes: None,
@@ -293,6 +336,42 @@ mod tests {
             ],
             "symbols": [],
             "evidence": [],
+            "risks": [],
+            "next_reads": []
+        })
+        .to_string()
+    }
+
+    fn valid_brief_model_json() -> String {
+        json!({
+            "brief": {
+                "summary": "It defines a small function.",
+                "confidence": "high",
+                "not_found": false
+            },
+            "files": [
+                {
+                    "path": "tmp.rs",
+                    "role": "Input file.",
+                    "key_points": ["Defines one function."],
+                    "bytes": 13
+                }
+            ],
+            "symbols": [
+                {
+                    "name": "main",
+                    "kind": "function",
+                    "path": "tmp.rs",
+                    "responsibility": "Entry point."
+                }
+            ],
+            "evidence": [
+                {
+                    "path": "tmp.rs",
+                    "symbol": "main",
+                    "note": "File contains only main."
+                }
+            ],
             "risks": [],
             "next_reads": []
         })

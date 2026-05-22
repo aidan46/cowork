@@ -2,6 +2,8 @@ use serde::Serialize;
 
 /// Ask output parse.
 mod ask;
+/// Brief output parse.
+mod brief;
 /// Doctor output parse.
 mod doctor;
 /// Init text render.
@@ -13,6 +15,8 @@ mod locate;
 const SCHEMA_VERSION: &str = "1.0";
 /// `ask` command tag.
 const ASK_COMMAND: &str = "ask";
+/// `brief` command tag.
+const BRIEF_COMMAND: &str = "brief";
 /// CLI command tag.
 const CLI_COMMAND: &str = "cli";
 /// `doctor` command tag.
@@ -82,6 +86,7 @@ const CLAUDE_INIT_RULES: &str = r#"# cowork rules for Claude
 "#;
 
 pub(crate) use ask::parse_ask_output;
+pub(crate) use brief::parse_brief_output;
 pub(crate) use doctor::{DoctorCheck, DoctorOutput, parse_doctor_probe};
 pub(crate) use init::{init_target_file, render_init_rules, update_init_managed_block};
 pub(crate) use locate::parse_locate_output;
