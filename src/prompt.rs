@@ -23,8 +23,7 @@ const ASK_SCHEMA_BLOCK: &str = concat!(
     "symbols:[{name:string,kind:\"function\"|\"type\"|\"trait\"|\"impl\"|\"module\"|\"constant\"|\"variable\"|\"route\"|\"component\"|\"test\"|\"unknown\",path:string,relevance:string}]\n",
     "evidence:[{path:string,symbol:string,note:string}]\n",
     "risks:[{kind:\"missing_context\"|\"model_uncertainty\"|\"parse_error\"|\"skipped_file\"|\"unsupported_file\"|\"unknown\",message:string}]\n",
-    "next_reads:[{path:string,reason:string}]\n",
-    "metadata:{input_bytes:number,duration_ms:number}"
+    "next_reads:[{path:string,reason:string}]"
 );
 /// Locate schema block.
 const LOCATE_SCHEMA_BLOCK: &str = concat!(
@@ -140,7 +139,7 @@ mod tests {
 
         assert!(prompt.contains("answer:{summary:string,confidence:"));
         assert!(prompt.contains("next_reads:[{path:string,reason:string}]"));
-        assert!(prompt.contains("metadata:{input_bytes:number,duration_ms:number}"));
+        assert!(!prompt.contains("metadata:{input_bytes:number,duration_ms:number}"));
     }
 
     #[test]

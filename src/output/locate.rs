@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-use super::{LOCATE_COMMAND, SCHEMA_VERSION, STATUS_OK};
+use super::{CommandMetadata, LOCATE_COMMAND, SCHEMA_VERSION, STATUS_OK};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// Locate command output.
@@ -19,6 +19,8 @@ pub(crate) struct LocateOutput {
     next_reads: Vec<LocateNextRead>,
     /// Risk list.
     risks: Vec<LocateRisk>,
+    /// Output metadata.
+    metadata: CommandMetadata,
 }
 
 impl LocateOutput {
@@ -27,10 +29,21 @@ impl LocateOutput {
     /// # Errors
     ///
     /// Returns [`AppError`] when JSON serialization fails.
-    pub(crate) fn to_json(&self) -> Result<String, AppError> {
-        serde_json::to_string(self).map_err(|error| {
-            AppError::response_parse_failed(format!("failed to serialize locate output: {error}"))
-        })
+    pub(crate) fn into_json(mut self) -> Result<String, AppError> {
+        loop {
+            let json = serde_json::to_string(&self).map_err(|error| {
+                AppError::response_parse_failed(format!(
+                    "failed to serialize locate output: {error}"
+                ))
+            })?;
+            let output_bytes = json.len();
+
+            if self.metadata.output_bytes == output_bytes {
+                return Ok(json);
+            }
+
+            self.metadata.set_output_bytes(output_bytes);
+        }
     }
 }
 
@@ -45,9 +58,9 @@ struct RawLocateOutput {
     risks: Vec<LocateRisk>,
 }
 
-impl From<RawLocateOutput> for LocateOutput {
+impl LocateOutput {
     /// Add fixed fields and normalize order.
-    fn from(value: RawLocateOutput) -> Self {
+    fn from_raw(value: RawLocateOutput, metadata: CommandMetadata) -> Self {
         let mut matches = value.matches;
         let mut next_reads = value.next_reads;
         let mut risks = value.risks;
@@ -66,6 +79,7 @@ impl From<RawLocateOutput> for LocateOutput {
             matches,
             next_reads,
             risks,
+            metadata,
         }
     }
 }
@@ -242,9 +256,12 @@ impl LocateRiskKind {
 /// # Errors
 ///
 /// Returns [`AppError`] when the JSON is invalid or required fields do not match schema.
-pub(crate) fn parse_locate_output(raw_json: &str) -> Result<LocateOutput, AppError> {
+pub(crate) fn parse_locate_output(
+    raw_json: &str,
+    metadata: CommandMetadata,
+) -> Result<LocateOutput, AppError> {
     serde_json::from_str::<RawLocateOutput>(raw_json)
-        .map(LocateOutput::from)
+        .map(|value| LocateOutput::from_raw(value, metadata))
         .map_err(|error| {
             AppError::response_parse_failed(format!("failed to parse locate output: {error}"))
         })
@@ -258,24 +275,53 @@ mod tests {
     use serde_json::json;
 
     use super::parse_locate_output;
-    use crate::error::AppError;
+    use crate::{error::AppError, output::CommandMetadata};
 
     #[test]
     fn valid_model_json_parses_to_typed_success_output() {
-        let output = parse_locate_output(&valid_model_json()).expect("output should parse");
+        let output =
+            parse_locate_output(&valid_model_json(), metadata()).expect("output should parse");
 
         assert_eq!(output.matches.len(), 2);
         assert_eq!(output.next_reads.len(), 1);
         assert_eq!(output.risks.len(), 1);
+        assert_eq!(output.metadata.input_bytes, 12420);
+        assert_eq!(output.metadata.duration_ms, 980);
+        assert_eq!(output.metadata.output_bytes, 0);
+    }
+
+    #[test]
+    fn serialized_json_uses_cli_owned_metadata() {
+        let output =
+            parse_locate_output(&valid_model_json(), metadata()).expect("output should parse");
+        let value = serde_json::from_str::<serde_json::Value>(
+            &output.into_json().expect("output should serialize"),
+        )
+        .expect("json should parse");
+
+        assert_eq!(value["metadata"]["input_bytes"], 12420);
+        assert_eq!(value["metadata"]["duration_ms"], 980);
+        assert!(value["metadata"]["output_bytes"].as_u64().unwrap_or(0) > 0);
+        assert!(
+            value["metadata"]["compression_ratio"]
+                .as_str()
+                .and_then(|ratio| ratio.parse::<f64>().ok())
+                .is_some_and(|ratio| ratio > 1.0)
+        );
     }
 
     #[test]
     fn serialized_json_keeps_fixed_top_level_fields() {
-        let output = parse_locate_output(&valid_model_json()).expect("output should parse");
-        let value = serde_json::from_str::<serde_json::Value>(
-            &output.to_json().expect("output should serialize"),
+        let output =
+            parse_locate_output(&valid_model_json(), metadata()).expect("output should parse");
+        let mut value = serde_json::from_str::<serde_json::Value>(
+            &output.into_json().expect("output should serialize"),
         )
         .expect("json should parse");
+        let metadata = value
+            .as_object_mut()
+            .and_then(|root| root.remove("metadata"))
+            .expect("metadata should exist");
 
         assert_eq!(
             value,
@@ -311,6 +357,16 @@ mod tests {
                 ]
             })
         );
+
+        assert_eq!(metadata["input_bytes"], 12420);
+        assert_eq!(metadata["duration_ms"], 980);
+        assert!(metadata["output_bytes"].as_u64().unwrap_or(0) > 0);
+        assert!(
+            metadata["compression_ratio"]
+                .as_str()
+                .and_then(|ratio| ratio.parse::<f64>().ok())
+                .is_some_and(|ratio| ratio > 1.0)
+        );
     }
 
     #[test]
@@ -320,6 +376,7 @@ mod tests {
                 "matches":[],
                 "risks":[]
             }"#,
+            metadata(),
         )
         .expect_err("parse should fail");
 
@@ -340,6 +397,7 @@ mod tests {
                 "next_reads":[],
                 "risks":[]
             }"#,
+            metadata(),
         )
         .expect_err("parse should fail");
 
@@ -376,5 +434,9 @@ mod tests {
             ]
         })
         .to_string()
+    }
+
+    fn metadata() -> CommandMetadata {
+        CommandMetadata::new(12420, 980)
     }
 }

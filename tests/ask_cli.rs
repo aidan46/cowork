@@ -39,7 +39,8 @@ fn missing_model_without_config_returns_invalid_arguments() {
 #[test]
 fn config_backed_success_returns_ok_json() {
     let dirs = test_dirs("config-success");
-    let file = write_temp_file(&dirs.project, "input.rs", "fn answer() -> u8 { 42 }\n");
+    let content = "fn answer() -> u8 { 42 }\n";
+    let file = write_temp_file(&dirs.project, "input.rs", content);
     let (host, handle) = spawn_server(ok_response(&response_envelope(&valid_model_json())));
 
     write_config(
@@ -60,6 +61,10 @@ fn config_backed_success_returns_ok_json() {
     let json = parse_stdout(&output.stdout);
     assert_eq!(json["status"], "ok");
     assert_eq!(json["command"], "ask");
+    assert_eq!(json["metadata"]["input_bytes"], content.len());
+    assert!(json["metadata"]["duration_ms"].as_u64().is_some());
+    assert!(json["metadata"]["output_bytes"].as_u64().unwrap_or(0) > 0);
+    assert!(json["metadata"].get("compression_ratio").is_none());
 }
 
 #[test]
@@ -255,11 +260,7 @@ fn valid_model_json() -> String {
         "symbols": [],
         "evidence": [],
         "risks": [],
-        "next_reads": [],
-        "metadata": {
-            "input_bytes": 13,
-            "duration_ms": 4
-        }
+        "next_reads": []
     })
     .to_string()
 }

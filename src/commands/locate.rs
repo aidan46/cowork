@@ -1,4 +1,4 @@
-use std::{env, path::Path, process::ExitCode};
+use std::{env, path::Path, process::ExitCode, time::Instant};
 
 use crate::{
     LocateArgs,
@@ -63,8 +63,11 @@ fn run_locate_json_in(
     let model = config.model.as_deref().ok_or_else(|| {
         AppError::invalid_arguments("`--model` required, no default model configured yet")
     })?;
+    let started = Instant::now();
     let raw_output = model::request_generate(&config.host, model, &prompt)?;
-    let output = output::parse_locate_output(&raw_output)?;
+    let duration_ms = usize::try_from(started.elapsed().as_millis()).unwrap_or(usize::MAX);
+    let metadata = output::CommandMetadata::new(loaded_files.total_bytes, duration_ms);
+    let output = output::parse_locate_output(&raw_output, metadata)?;
 
-    output.to_json()
+    output.into_json()
 }

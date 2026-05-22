@@ -20,7 +20,8 @@ use serde_json::{Value, json};
 #[test]
 fn config_backed_success_returns_ok_json() {
     let dirs = test_dirs("config-success");
-    let file = write_temp_file(&dirs.project, "input.rs", "fn answer() -> u8 { 42 }\n");
+    let content = "fn answer() -> u8 { 42 }\n";
+    let file = write_temp_file(&dirs.project, "input.rs", content);
     let (host, handle) = spawn_server(ok_response(&response_envelope(&valid_model_json())));
 
     write_config(
@@ -45,6 +46,10 @@ fn config_backed_success_returns_ok_json() {
     assert_eq!(json["matches"][0]["path"], "src/cli.rs");
     assert_eq!(json["next_reads"][0]["path"], "src/cli.rs");
     assert_eq!(json["risks"][0]["kind"], "missing_context");
+    assert_eq!(json["metadata"]["input_bytes"], content.len());
+    assert!(json["metadata"]["duration_ms"].as_u64().is_some());
+    assert!(json["metadata"]["output_bytes"].as_u64().unwrap_or(0) > 0);
+    assert!(json["metadata"].get("compression_ratio").is_none());
 }
 
 fn run_locate(project_dir: &Path, home_dir: &Path, args: &[String]) -> std::process::Output {

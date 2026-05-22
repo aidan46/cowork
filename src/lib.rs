@@ -77,7 +77,8 @@ mod tests {
     #[test]
     fn happy_path_returns_success_json() {
         let dirs = test_dirs();
-        let file = write_temp_file("fn main() {}\n");
+        let content = "fn main() {}\n";
+        let file = write_temp_file(content);
         let (host, handle) = spawn_server(ok_response(&response_envelope(&valid_model_json())));
         let args = ask_args(vec![file], Some("gemma3:12b"), Some(host));
 
@@ -88,6 +89,10 @@ mod tests {
 
         handle.join().expect("server should join");
         assert_eq!(value["status"], "ok");
+        assert_eq!(value["metadata"]["input_bytes"], content.len());
+        assert!(value["metadata"]["duration_ms"].as_u64().is_some());
+        assert!(value["metadata"]["output_bytes"].as_u64().unwrap_or(0) > 0);
+        assert!(value["metadata"].get("compression_ratio").is_none());
     }
 
     #[test]
@@ -289,11 +294,7 @@ mod tests {
             "symbols": [],
             "evidence": [],
             "risks": [],
-            "next_reads": [],
-            "metadata": {
-                "input_bytes": 13,
-                "duration_ms": 4
-            }
+            "next_reads": []
         })
         .to_string()
     }
