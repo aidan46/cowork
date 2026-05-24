@@ -28,9 +28,12 @@ fn codex_prints_rules_without_writing_files() {
 
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("# cowork rules for Codex"));
+    assert!(stdout.contains("cowork locate"));
     assert!(stdout.contains("cowork ask"));
-    assert!(stdout.contains("cowork doctor"));
+    assert!(stdout.contains("cowork brief"));
+    assert!(stdout.contains("evidence"));
     assert!(stdout.contains("next_reads"));
+    assert!(stdout.contains("cowork doctor"));
     assert!(stdout.contains("lead, not authority"));
     assert!(!dirs.project.join("AGENTS.md").exists());
     assert!(!dirs.project.join("CLAUDE.md").exists());
@@ -52,9 +55,12 @@ fn claude_prints_rules_without_writing_files() {
 
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("# cowork rules for Claude"));
+    assert!(stdout.contains("cowork locate"));
     assert!(stdout.contains("cowork ask"));
-    assert!(stdout.contains("cowork doctor"));
+    assert!(stdout.contains("cowork brief"));
+    assert!(stdout.contains("evidence"));
     assert!(stdout.contains("next_reads"));
+    assert!(stdout.contains("cowork doctor"));
     assert!(stdout.contains("lead, not authority"));
     assert!(!dirs.project.join("AGENTS.md").exists());
     assert!(!dirs.project.join("CLAUDE.md").exists());

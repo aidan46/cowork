@@ -29,7 +29,11 @@ fn codex_write_creates_agents_file_and_stays_idempotent() {
     assert!(first.contains(CODEX_START));
     assert!(first.contains(CODEX_END));
     assert!(first.contains("# cowork rules for Codex"));
+    assert!(first.contains("cowork locate"));
     assert!(first.contains("cowork ask"));
+    assert!(first.contains("cowork brief"));
+    assert!(first.contains("evidence"));
+    assert!(first.contains("next_reads"));
     assert!(!dirs.project.join("CLAUDE.md").exists());
 
     run_init_write(&dirs, "codex");
@@ -52,6 +56,10 @@ fn claude_write_creates_claude_file() {
     assert!(content.contains(CLAUDE_START));
     assert!(content.contains(CLAUDE_END));
     assert!(content.contains("# cowork rules for Claude"));
+    assert!(content.contains("cowork locate"));
+    assert!(content.contains("cowork brief"));
+    assert!(content.contains("evidence"));
+    assert!(content.contains("next_reads"));
     assert!(content.contains("cowork doctor"));
     assert!(!dirs.project.join("AGENTS.md").exists());
 }
@@ -73,6 +81,10 @@ fn codex_write_replaces_existing_managed_block_only() {
     assert!(content.starts_with("before\n\n"));
     assert!(content.ends_with("\n\nafter\n"));
     assert!(!content.contains("old rules"));
+    assert!(content.contains("cowork locate"));
+    assert!(content.contains("cowork brief"));
+    assert!(content.contains("evidence"));
+    assert!(content.contains("next_reads"));
     assert_eq!(content.matches(CODEX_START).count(), 1);
     assert_eq!(content.matches(CODEX_END).count(), 1);
 }
@@ -97,6 +109,10 @@ fn claude_write_preserves_user_content_before_and_after_block() {
     assert!(content.ends_with(suffix));
     assert!(!content.contains("old block"));
     assert!(content.contains("# cowork rules for Claude"));
+    assert!(content.contains("cowork locate"));
+    assert!(content.contains("cowork brief"));
+    assert!(content.contains("evidence"));
+    assert!(content.contains("next_reads"));
 }
 
 #[test]

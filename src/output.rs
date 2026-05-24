@@ -65,23 +65,25 @@ impl CommandMetadata {
 /// Codex init rules block.
 const CODEX_INIT_RULES: &str = r#"# cowork rules for Codex
 
+- Use `cowork locate` first when unsure which files matter.
 - Use `cowork ask` before reading more than 3 files or any large file.
-- Ask narrow questions, example: `cowork ask --paths src/cli.rs src/lib.rs --question "How does init print flow work?"`
-- Ask narrow questions, example: `cowork ask --paths src/output.rs --question "Where are init rules defined?"`
+- Ask narrow questions, example: `cowork ask --paths src/output.rs --question \"Where are init rules defined?\"`
+- Use `cowork brief` when cloud context would otherwise need raw files.
+- Inspect `evidence` and `next_reads` before edits.
 - Do not use `cowork ask` for whole-repo summaries, final authority, or write plans without code evidence.
 - If setup fails, run `cowork doctor`.
-- Inspect `next_reads` yourself before acting.
 - Treat local model output as lead, not authority.
 "#;
 /// Claude init rules block.
 const CLAUDE_INIT_RULES: &str = r#"# cowork rules for Claude
 
+- Use `cowork locate` first when unsure which files matter.
 - Use `cowork ask` before reading more than 3 files or any large file.
-- Ask narrow questions, example: `cowork ask --paths src/cli.rs src/lib.rs --question "How does init print flow work?"`
-- Ask narrow questions, example: `cowork ask --paths src/output.rs --question "Where are init rules defined?"`
+- Ask narrow questions, example: `cowork ask --paths src/output.rs --question \"Where are init rules defined?\"`
+- Use `cowork brief` when cloud context would otherwise need raw files.
+- Inspect `evidence` and `next_reads` before edits.
 - Do not use `cowork ask` for whole-repo summaries, final authority, or write plans without code evidence.
 - If setup fails, run `cowork doctor`.
-- Inspect `next_reads` yourself before acting.
 - Treat local model output as lead, not authority.
 "#;
 
