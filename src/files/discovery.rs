@@ -22,9 +22,13 @@ const DEFAULT_EXCLUDED_DIRS: [&str; 8] = [
 /// # Errors
 ///
 /// Returns [`AppError`] when any input path is missing or needs `--recursive`.
-pub(crate) fn validate_ask_paths(paths: &[PathBuf], recursive: bool) -> Result<(), AppError> {
+pub(crate) fn validate_ask_paths(
+    paths: &[PathBuf],
+    recursive: bool,
+    fail_on_missing: bool,
+) -> Result<(), AppError> {
     for path in paths {
-        validate_path(path, recursive)?;
+        validate_path(path, recursive, fail_on_missing)?;
     }
 
     Ok(())
@@ -40,8 +44,9 @@ pub fn collect_ask_candidates(
     recursive: bool,
     include: &[String],
     exclude: &[String],
+    fail_on_missing: bool,
 ) -> Result<Vec<PathBuf>, AppError> {
-    validate_ask_paths(paths, recursive)?;
+    validate_ask_paths(paths, recursive, fail_on_missing)?;
 
     let filters = CandidateFilters::build(include, exclude)?;
     let mut candidates = Vec::new();
@@ -61,9 +66,13 @@ pub fn collect_ask_candidates(
 /// # Errors
 ///
 /// Returns [`AppError`] when the path is missing or a dir needs `--recursive`.
-fn validate_path(path: &Path, recursive: bool) -> Result<(), AppError> {
+fn validate_path(path: &Path, recursive: bool, fail_on_missing: bool) -> Result<(), AppError> {
     if !path.exists() {
-        return Err(AppError::missing_path(path));
+        if fail_on_missing {
+            return Err(AppError::missing_path(path));
+        }
+
+        return Ok(());
     }
 
     if path.is_symlink() {

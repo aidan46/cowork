@@ -95,6 +95,80 @@ fn bad_model_json_returns_response_parse_failed() {
     assert_eq!(json["error"]["code"], "RESPONSE_PARSE_FAILED");
 }
 
+#[test]
+fn strict_missing_path_returns_missing_path_error() {
+    let dirs = test_dirs("strict-missing");
+    let missing = dirs.project.join("missing.rs");
+
+    let output = run_ask(
+        &dirs.project,
+        &dirs.home,
+        &[arg_path(&missing), arg_question("explain")],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["command"], "ask");
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "MISSING_PATH");
+}
+
+#[test]
+fn no_fail_on_missing_mixed_paths_reach_runtime_flow() {
+    let dirs = test_dirs("mixed-paths");
+    let file = write_temp_file(&dirs.project, "input.rs", "fn main() {}\n");
+    let missing = dirs.project.join("missing.rs");
+
+    let output = run_ask(
+        &dirs.project,
+        &dirs.home,
+        &[
+            arg_path(&file),
+            arg_path(&missing),
+            arg_question("explain"),
+            "--no-fail-on-missing".to_string(),
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["command"], "ask");
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "INVALID_ARGUMENTS");
+}
+
+#[test]
+fn no_fail_on_missing_all_missing_paths_return_no_input_files() {
+    let dirs = test_dirs("all-missing");
+    let missing = dirs.project.join("missing.rs");
+
+    let output = run_ask(
+        &dirs.project,
+        &dirs.home,
+        &[
+            arg_path(&missing),
+            arg_question("explain"),
+            "--no-fail-on-missing".to_string(),
+            "--model".to_string(),
+            "gemma3:12b".to_string(),
+            "--host".to_string(),
+            "http://127.0.0.1:1".to_string(),
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["command"], "ask");
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "NO_INPUT_FILES");
+}
+
 fn run_ask(project_dir: &Path, home_dir: &Path, args: &[String]) -> std::process::Output {
     Command::cargo_bin("cowork")
         .expect("binary should build")

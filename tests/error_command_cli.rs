@@ -68,6 +68,106 @@ fn malformed_cli_still_reports_cli_command() {
     assert_eq!(json["error"]["code"], "INVALID_ARGUMENTS");
 }
 
+#[test]
+fn brief_strict_missing_path_reports_brief_command() {
+    let dirs = test_dirs("brief-strict-missing");
+    let missing = dirs.project.join("missing.rs");
+
+    let output = run_command(
+        &dirs.project,
+        &dirs.home,
+        &["brief", &arg_path(&missing), "--goal=Summarize parser"],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["command"], "brief");
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "MISSING_PATH");
+}
+
+#[test]
+fn brief_no_fail_on_missing_mixed_paths_reach_runtime_flow() {
+    let dirs = test_dirs("brief-mixed-paths");
+    let file = write_temp_file(&dirs.project, "input.rs", "fn main() {}\n");
+    let missing = dirs.project.join("missing.rs");
+
+    let output = run_command(
+        &dirs.project,
+        &dirs.home,
+        &[
+            "brief",
+            &arg_path(&file),
+            &arg_path(&missing),
+            "--goal=Summarize parser",
+            "--no-fail-on-missing",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["command"], "brief");
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "INVALID_ARGUMENTS");
+}
+
+#[test]
+fn brief_no_fail_on_missing_all_missing_paths_return_no_input_files() {
+    let dirs = test_dirs("brief-all-missing");
+    let missing = dirs.project.join("missing.rs");
+
+    let output = run_command(
+        &dirs.project,
+        &dirs.home,
+        &[
+            "brief",
+            &arg_path(&missing),
+            "--goal=Summarize parser",
+            "--no-fail-on-missing",
+            "--model=gemma3:12b",
+            "--host=http://127.0.0.1:1",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["command"], "brief");
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "NO_INPUT_FILES");
+}
+
+#[test]
+fn conflicting_missing_path_flags_report_cli_command() {
+    let dirs = test_dirs("conflicting-missing-path-flags");
+    let file = write_temp_file(&dirs.project, "input.rs", "fn main() {}\n");
+
+    let output = run_command(
+        &dirs.project,
+        &dirs.home,
+        &[
+            "ask",
+            &arg_path(&file),
+            "--question=explain",
+            "--fail-on-missing",
+            "--no-fail-on-missing",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["command"], "cli");
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "INVALID_ARGUMENTS");
+}
+
 fn run_command(project_dir: &Path, home_dir: &Path, args: &[&str]) -> std::process::Output {
     Command::cargo_bin("cowork")
         .expect("binary should build")

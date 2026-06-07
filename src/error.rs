@@ -50,6 +50,9 @@ pub enum AppError {
         /// Update error text.
         message: String,
     },
+    #[error("no readable UTF-8 text input files found")]
+    /// No text input files survived load.
+    NoInputFiles,
     #[error("input bytes exceed `--max-bytes`: {actual_bytes} > {max_bytes}")]
     /// Loaded bytes exceed cap.
     MaxBytesExceeded {
@@ -144,6 +147,12 @@ impl AppError {
     }
 
     #[must_use]
+    /// Build no-input-files error.
+    pub fn no_input_files() -> Self {
+        Self::NoInputFiles
+    }
+
+    #[must_use]
     /// Build max-bytes error.
     pub fn max_bytes_exceeded(max_bytes: usize, actual_bytes: usize) -> Self {
         Self::MaxBytesExceeded {
@@ -177,7 +186,8 @@ impl AppError {
             Self::MissingPath { .. }
             | Self::DirectoryRequiresRecursive { .. }
             | Self::FileRead { .. }
-            | Self::InitFileUpdate { .. } => ExitCode::from(2),
+            | Self::InitFileUpdate { .. }
+            | Self::NoInputFiles => ExitCode::from(2),
             Self::MaxBytesExceeded { .. } => ExitCode::from(3),
             Self::ModelRequestFailed { .. } => ExitCode::from(4),
             Self::ResponseParseFailed { .. } => ExitCode::from(5),
@@ -213,6 +223,7 @@ impl AppError {
             Self::DirectoryRequiresRecursive { .. } => "DIRECTORY_REQUIRES_RECURSIVE",
             Self::FileRead { .. } => "FILE_READ_FAILED",
             Self::InitFileUpdate { .. } => "INIT_FILE_UPDATE_FAILED",
+            Self::NoInputFiles => "NO_INPUT_FILES",
             Self::MaxBytesExceeded { .. } => "MAX_BYTES_EXCEEDED",
             Self::ModelRequestFailed { .. } => "MODEL_REQUEST_FAILED",
             Self::ResponseParseFailed { .. } => "RESPONSE_PARSE_FAILED",
@@ -229,6 +240,7 @@ impl AppError {
             Self::MissingPath { .. }
             | Self::DirectoryRequiresRecursive { .. }
             | Self::FileRead { .. }
+            | Self::NoInputFiles
             | Self::MaxBytesExceeded { .. }
             | Self::ModelRequestFailed { .. }
             | Self::ResponseParseFailed { .. } => "ask",
@@ -249,6 +261,7 @@ impl AppError {
             Self::InitFileUpdate { .. } => {
                 Some("Check target file perms and managed block markers.")
             }
+            Self::NoInputFiles => Some("Provide at least one readable UTF-8 text file."),
             Self::MaxBytesExceeded { .. } => Some("Pass larger `--max-bytes` or fewer files."),
             Self::ModelRequestFailed { .. } => Some("Check Ollama server, model, and `--host`."),
             Self::ResponseParseFailed { .. } => Some("Check Ollama response and ask JSON schema."),
@@ -343,6 +356,34 @@ mod tests {
         assert_eq!(
             AppError::missing_path(std::path::Path::new("nope")).exit_code(),
             ExitCode::from(2)
+        );
+    }
+
+    #[test]
+    fn no_input_files_contract_stays_exact() {
+        let error = AppError::no_input_files();
+        let value =
+            serde_json::from_str::<serde_json::Value>(&error.to_json()).expect("json should parse");
+
+        assert_eq!(
+            error.to_string(),
+            "no readable UTF-8 text input files found"
+        );
+        assert_eq!(error.code(), "NO_INPUT_FILES");
+        assert_eq!(
+            error.hint(),
+            Some("Provide at least one readable UTF-8 text file.")
+        );
+        assert_eq!(error.exit_code(), ExitCode::from(2));
+        assert_eq!(value["command"], "ask");
+        assert_eq!(value["error"]["code"], "NO_INPUT_FILES");
+        assert_eq!(
+            value["error"]["message"],
+            "no readable UTF-8 text input files found"
+        );
+        assert_eq!(
+            value["error"]["hint"],
+            "Provide at least one readable UTF-8 text file."
         );
     }
 
