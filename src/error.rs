@@ -14,6 +14,14 @@ pub enum AppError {
         /// Error message.
         message: String,
     },
+    #[error("{source}")]
+    /// Subcommand tag wraps source error.
+    CommandContext {
+        /// Command tag.
+        command: &'static str,
+        /// Wrapped source error.
+        source: Box<Self>,
+    },
     #[error("path does not exist: {path}")]
     /// Input path missing.
     MissingPath {
@@ -93,6 +101,15 @@ impl AppError {
     }
 
     #[must_use]
+    /// Wrap error with subcommand tag.
+    pub fn with_command(self, command: &'static str) -> Self {
+        Self::CommandContext {
+            command,
+            source: Box::new(self),
+        }
+    }
+
+    #[must_use]
     /// Build missing-path error.
     pub fn missing_path(path: &Path) -> Self {
         Self::MissingPath {
@@ -156,6 +173,7 @@ impl AppError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
             Self::InvalidArguments { .. } => ExitCode::from(1),
+            Self::CommandContext { source, .. } => source.exit_code(),
             Self::MissingPath { .. }
             | Self::DirectoryRequiresRecursive { .. }
             | Self::FileRead { .. }
@@ -190,6 +208,7 @@ impl AppError {
     fn code(&self) -> &'static str {
         match self {
             Self::InvalidArguments { .. } => "INVALID_ARGUMENTS",
+            Self::CommandContext { source, .. } => source.code(),
             Self::MissingPath { .. } => "MISSING_PATH",
             Self::DirectoryRequiresRecursive { .. } => "DIRECTORY_REQUIRES_RECURSIVE",
             Self::FileRead { .. } => "FILE_READ_FAILED",
@@ -205,6 +224,7 @@ impl AppError {
     fn command(&self) -> &'static str {
         match self {
             Self::InvalidArguments { .. } => cli_command(),
+            Self::CommandContext { command, .. } => command,
             Self::InitFileUpdate { .. } => init_command(),
             Self::MissingPath { .. }
             | Self::DirectoryRequiresRecursive { .. }
@@ -220,6 +240,7 @@ impl AppError {
     fn hint(&self) -> Option<&'static str> {
         match self {
             Self::InvalidArguments { .. } => Some("Use `cowork --help`."),
+            Self::CommandContext { source, .. } => source.hint(),
             Self::MissingPath { .. } => Some("Check path spelling and current dir."),
             Self::DirectoryRequiresRecursive { .. } => {
                 Some("Pass `--recursive` for directory inputs.")
@@ -289,6 +310,31 @@ mod tests {
                     "hint": "Use `cowork --help`."
                 }
             })
+        );
+    }
+
+    #[test]
+    fn command_context_preserves_source_contract() {
+        let error = AppError::max_bytes_exceeded(1, 2).with_command("locate");
+        let value =
+            serde_json::from_str::<serde_json::Value>(&error.to_json()).expect("json should parse");
+
+        assert_eq!(error.to_string(), "input bytes exceed `--max-bytes`: 2 > 1");
+        assert_eq!(error.code(), "MAX_BYTES_EXCEEDED");
+        assert_eq!(
+            error.hint(),
+            Some("Pass larger `--max-bytes` or fewer files.")
+        );
+        assert_eq!(error.exit_code(), ExitCode::from(3));
+        assert_eq!(value["command"], "locate");
+        assert_eq!(value["error"]["code"], "MAX_BYTES_EXCEEDED");
+        assert_eq!(
+            value["error"]["message"],
+            "input bytes exceed `--max-bytes`: 2 > 1"
+        );
+        assert_eq!(
+            value["error"]["hint"],
+            "Pass larger `--max-bytes` or fewer files."
         );
     }
 

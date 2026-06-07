@@ -41,11 +41,15 @@ fn try_run() -> Result<ExitCode, AppError> {
     let cli = parse_cli()?;
 
     match cli.command {
-        Command::Ask(args) => ask::run_ask(args),
-        Command::Brief(args) => brief::run_brief(args),
-        Command::Locate(args) => locate::run_locate(args),
-        Command::Doctor(args) => doctor::run_doctor(args),
-        Command::Init(args) => init::run_init(args),
+        Command::Ask(args) => ask::run_ask(args).map_err(|error| error.with_command("ask")),
+        Command::Brief(args) => brief::run_brief(args).map_err(|error| error.with_command("brief")),
+        Command::Locate(args) => {
+            locate::run_locate(args).map_err(|error| error.with_command("locate"))
+        }
+        Command::Doctor(args) => {
+            doctor::run_doctor(args).map_err(|error| error.with_command("doctor"))
+        }
+        Command::Init(args) => init::run_init(args).map_err(|error| error.with_command("init")),
     }
 }
 
