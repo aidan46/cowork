@@ -52,6 +52,10 @@ pub(crate) fn load_ask_files(
         files.push(file);
     }
 
+    if files.is_empty() {
+        return Err(AppError::no_input_files());
+    }
+
     Ok(LoadedAskFiles { files, total_bytes })
 }
 

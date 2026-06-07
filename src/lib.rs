@@ -164,6 +164,7 @@ mod tests {
             include: Vec::new(),
             exclude: Vec::new(),
             fail_on_missing: false,
+            no_fail_on_missing: false,
         }
     }
 
@@ -183,6 +184,7 @@ mod tests {
             include: Vec::new(),
             exclude: Vec::new(),
             fail_on_missing: false,
+            no_fail_on_missing: false,
         }
     }
 

@@ -26,8 +26,8 @@ mod tests {
     fn missing_path_returns_missing_path_error() {
         let path = unique_path("missing");
 
-        let error =
-            validate_ask_paths(std::slice::from_ref(&path), false).expect_err("path should fail");
+        let error = validate_ask_paths(std::slice::from_ref(&path), false, true)
+            .expect_err("path should fail");
 
         match error {
             AppError::MissingPath { path: error_path } => {
@@ -42,8 +42,8 @@ mod tests {
         let dir = unique_path("dir");
         fs::create_dir(&dir).expect("dir should create");
 
-        let error =
-            validate_ask_paths(std::slice::from_ref(&dir), false).expect_err("dir should fail");
+        let error = validate_ask_paths(std::slice::from_ref(&dir), false, true)
+            .expect_err("dir should fail");
 
         match error {
             AppError::DirectoryRequiresRecursive { path } => {
@@ -63,8 +63,9 @@ mod tests {
         write_file(&alpha);
         write_file(&beta);
 
-        let candidates = collect_ask_candidates(std::slice::from_ref(&dir.path), true, &[], &[])
-            .expect("recursive walk should pass");
+        let candidates =
+            collect_ask_candidates(std::slice::from_ref(&dir.path), true, &[], &[], true)
+                .expect("recursive walk should pass");
 
         assert_eq!(candidates, vec![alpha, beta]);
     }
@@ -79,8 +80,9 @@ mod tests {
         write_file(&git_file);
         write_file(&module_file);
 
-        let candidates = collect_ask_candidates(std::slice::from_ref(&dir.path), true, &[], &[])
-            .expect("recursive walk should pass");
+        let candidates =
+            collect_ask_candidates(std::slice::from_ref(&dir.path), true, &[], &[], true)
+                .expect("recursive walk should pass");
 
         assert_eq!(candidates, vec![keep]);
     }
@@ -100,6 +102,7 @@ mod tests {
             true,
             &["*.rs".to_string()],
             &["*test.rs".to_string()],
+            true,
         )
         .expect("glob filtering should pass");
 
@@ -117,6 +120,7 @@ mod tests {
             false,
             &["*.rs".to_string()],
             &[],
+            true,
         )
         .expect("explicit file should pass");
 
@@ -129,7 +133,72 @@ mod tests {
         let file = dir.path.join("input.txt");
         write_file(&file);
 
-        validate_ask_paths(&[file], false).expect("file path should pass");
+        validate_ask_paths(&[file], false, true).expect("file path should pass");
+    }
+
+    #[test]
+    fn strict_mixed_paths_return_missing_path_error() {
+        let dir = TestDir::new("strict-mixed");
+        let existing = dir.path.join("input.txt");
+        let missing = dir.path.join("missing.txt");
+        write_file(&existing);
+
+        let error = collect_ask_candidates(&[existing, missing.clone()], false, &[], &[], true)
+            .expect_err("missing path should fail");
+
+        match error {
+            AppError::MissingPath { path } => {
+                assert_eq!(path, missing.display().to_string());
+            }
+            other => panic!("expected missing path error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn permissive_mixed_paths_return_existing_candidates_only() {
+        let dir = TestDir::new("permissive-mixed");
+        let existing = dir.path.join("input.txt");
+        let missing = dir.path.join("missing.txt");
+        write_file(&existing);
+
+        let candidates =
+            collect_ask_candidates(&[existing.clone(), missing], false, &[], &[], false)
+                .expect("missing path should skip");
+
+        assert_eq!(candidates, vec![existing]);
+    }
+
+    #[test]
+    fn permissive_all_missing_paths_return_empty_candidates() {
+        let missing = unique_path("all-missing");
+
+        let candidates = collect_ask_candidates(&[missing], false, &[], &[], false)
+            .expect("missing paths should skip");
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn permissive_missing_path_still_errors_for_dir_without_recursive() {
+        let dir = TestDir::new("permissive-dir");
+        let missing = unique_path("permissive-dir-missing");
+
+        let error = collect_ask_candidates(&[missing, dir.path.clone()], false, &[], &[], false)
+            .expect_err("dir should still fail");
+
+        match error {
+            AppError::DirectoryRequiresRecursive { path } => {
+                assert_eq!(path, dir.path.display().to_string());
+            }
+            other => panic!("expected recursive error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_candidates_return_no_input_files_error() {
+        let error = load_ask_files(&[], None).expect_err("empty input should fail");
+
+        assert!(matches!(error, AppError::NoInputFiles));
     }
 
     #[test]
@@ -162,6 +231,28 @@ mod tests {
         assert_eq!(loaded.files.len(), 1);
         assert_eq!(loaded.files[0].path, text);
         assert_eq!(loaded.files[0].content, "ok");
+    }
+
+    #[test]
+    fn binary_only_input_returns_no_input_files_error() {
+        let dir = TestDir::new("binary-only");
+        let binary = dir.path.join("input.bin");
+        write_bytes(&binary, b"bin\0data");
+
+        let error = load_ask_files(&[binary], None).expect_err("binary-only input should fail");
+
+        assert!(matches!(error, AppError::NoInputFiles));
+    }
+
+    #[test]
+    fn non_utf8_only_input_returns_no_input_files_error() {
+        let dir = TestDir::new("utf8-only");
+        let invalid = dir.path.join("bad.txt");
+        write_bytes(&invalid, &[0x66, 0x6f, 0x80]);
+
+        let error = load_ask_files(&[invalid], None).expect_err("non-utf8 input should fail");
+
+        assert!(matches!(error, AppError::NoInputFiles));
     }
 
     #[test]

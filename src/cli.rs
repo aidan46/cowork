@@ -68,8 +68,12 @@ pub struct AskArgs {
     pub exclude: Vec<String>,
 
     /// Fail on missing path.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "no_fail_on_missing")]
     pub fail_on_missing: bool,
+
+    /// Skip missing paths.
+    #[arg(long, conflicts_with = "fail_on_missing")]
+    pub no_fail_on_missing: bool,
 }
 
 /// Args for `cowork brief`.
@@ -108,8 +112,12 @@ pub struct BriefArgs {
     pub exclude: Vec<String>,
 
     /// Fail on missing path.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "no_fail_on_missing")]
     pub fail_on_missing: bool,
+
+    /// Skip missing paths.
+    #[arg(long, conflicts_with = "fail_on_missing")]
+    pub no_fail_on_missing: bool,
 }
 
 /// Args for `cowork locate`.
@@ -148,8 +156,12 @@ pub struct LocateArgs {
     pub exclude: Vec<String>,
 
     /// Fail on missing path.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "no_fail_on_missing")]
     pub fail_on_missing: bool,
+
+    /// Skip missing paths.
+    #[arg(long, conflicts_with = "fail_on_missing")]
+    pub no_fail_on_missing: bool,
 }
 
 /// Args for `cowork doctor`.
@@ -203,6 +215,20 @@ mod tests {
 
     use super::{Cli, Command, InitAgent};
 
+    fn command_help(name: &str) -> String {
+        let mut command = Cli::command();
+        let subcommand = command
+            .find_subcommand_mut(name)
+            .expect("subcommand should exist");
+        let mut help = Vec::new();
+
+        subcommand
+            .write_long_help(&mut help)
+            .expect("help should render");
+
+        String::from_utf8(help).expect("help should be utf-8")
+    }
+
     #[test]
     fn ask_parses_required_flags() {
         let cli = Cli::try_parse_from([
@@ -220,6 +246,8 @@ mod tests {
             Command::Ask(args) => {
                 assert_eq!(args.paths.len(), 2);
                 assert_eq!(args.question, "Where is CLI parsing defined?");
+                assert!(!args.fail_on_missing);
+                assert!(!args.no_fail_on_missing);
             }
             Command::Brief(_) => panic!("expected ask command"),
             Command::Locate(_) => panic!("expected ask command"),
@@ -229,20 +257,13 @@ mod tests {
     }
 
     #[test]
-    fn ask_help_shows_required_flags() {
-        let mut command = Cli::command();
-        let ask = command
-            .find_subcommand_mut("ask")
-            .expect("ask subcommand should exist");
-        let mut help = Vec::new();
-
-        ask.write_long_help(&mut help)
-            .expect("ask help should render");
-
-        let help = String::from_utf8(help).expect("help should be utf-8");
+    fn ask_help_shows_missing_path_flags() {
+        let help = command_help("ask");
 
         assert!(help.contains("--paths <PATHS>..."));
         assert!(help.contains("--question <QUESTION>"));
+        assert!(help.contains("--fail-on-missing"));
+        assert!(help.contains("--no-fail-on-missing"));
     }
 
     #[test]
@@ -262,6 +283,8 @@ mod tests {
             Command::Brief(args) => {
                 assert_eq!(args.paths.len(), 2);
                 assert_eq!(args.goal, "trace CLI flow");
+                assert!(!args.fail_on_missing);
+                assert!(!args.no_fail_on_missing);
             }
             Command::Ask(_) => panic!("expected brief command"),
             Command::Locate(_) => panic!("expected brief command"),
@@ -271,21 +294,13 @@ mod tests {
     }
 
     #[test]
-    fn brief_help_shows_required_flags() {
-        let mut command = Cli::command();
-        let brief = command
-            .find_subcommand_mut("brief")
-            .expect("brief subcommand should exist");
-        let mut help = Vec::new();
-
-        brief
-            .write_long_help(&mut help)
-            .expect("brief help should render");
-
-        let help = String::from_utf8(help).expect("help should be utf-8");
+    fn brief_help_shows_missing_path_flags() {
+        let help = command_help("brief");
 
         assert!(help.contains("--paths <PATHS>..."));
         assert!(help.contains("--goal <GOAL>"));
+        assert!(help.contains("--fail-on-missing"));
+        assert!(help.contains("--no-fail-on-missing"));
     }
 
     #[test]
@@ -305,6 +320,8 @@ mod tests {
             Command::Locate(args) => {
                 assert_eq!(args.paths.len(), 2);
                 assert_eq!(args.thing, "CLI parser");
+                assert!(!args.fail_on_missing);
+                assert!(!args.no_fail_on_missing);
             }
             Command::Ask(_) => panic!("expected locate command"),
             Command::Brief(_) => panic!("expected locate command"),
@@ -314,21 +331,196 @@ mod tests {
     }
 
     #[test]
-    fn locate_help_shows_required_flags() {
-        let mut command = Cli::command();
-        let locate = command
-            .find_subcommand_mut("locate")
-            .expect("locate subcommand should exist");
-        let mut help = Vec::new();
-
-        locate
-            .write_long_help(&mut help)
-            .expect("locate help should render");
-
-        let help = String::from_utf8(help).expect("help should be utf-8");
+    fn locate_help_shows_missing_path_flags() {
+        let help = command_help("locate");
 
         assert!(help.contains("--paths <PATHS>..."));
         assert!(help.contains("--thing <THING>"));
+        assert!(help.contains("--fail-on-missing"));
+        assert!(help.contains("--no-fail-on-missing"));
+    }
+
+    #[test]
+    fn ask_parses_explicit_missing_path_flags() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "ask",
+            "--paths",
+            "src",
+            "--question",
+            "Where is CLI parsing defined?",
+            "--fail-on-missing",
+        ])
+        .expect("ask args should parse");
+
+        match cli.command {
+            Command::Ask(args) => {
+                assert!(args.fail_on_missing);
+                assert!(!args.no_fail_on_missing);
+            }
+            _ => panic!("expected ask command"),
+        }
+    }
+
+    #[test]
+    fn ask_parses_missing_path_opt_out() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "ask",
+            "--paths",
+            "src",
+            "--question",
+            "Where is CLI parsing defined?",
+            "--no-fail-on-missing",
+        ])
+        .expect("ask args should parse");
+
+        match cli.command {
+            Command::Ask(args) => {
+                assert!(!args.fail_on_missing);
+                assert!(args.no_fail_on_missing);
+            }
+            _ => panic!("expected ask command"),
+        }
+    }
+
+    #[test]
+    fn brief_parses_explicit_missing_path_flags() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "brief",
+            "--paths",
+            "src",
+            "--goal",
+            "trace CLI flow",
+            "--fail-on-missing",
+        ])
+        .expect("brief args should parse");
+
+        match cli.command {
+            Command::Brief(args) => {
+                assert!(args.fail_on_missing);
+                assert!(!args.no_fail_on_missing);
+            }
+            _ => panic!("expected brief command"),
+        }
+    }
+
+    #[test]
+    fn brief_parses_missing_path_opt_out() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "brief",
+            "--paths",
+            "src",
+            "--goal",
+            "trace CLI flow",
+            "--no-fail-on-missing",
+        ])
+        .expect("brief args should parse");
+
+        match cli.command {
+            Command::Brief(args) => {
+                assert!(!args.fail_on_missing);
+                assert!(args.no_fail_on_missing);
+            }
+            _ => panic!("expected brief command"),
+        }
+    }
+
+    #[test]
+    fn locate_parses_explicit_missing_path_flags() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "locate",
+            "--paths",
+            "src",
+            "--thing",
+            "CLI parser",
+            "--fail-on-missing",
+        ])
+        .expect("locate args should parse");
+
+        match cli.command {
+            Command::Locate(args) => {
+                assert!(args.fail_on_missing);
+                assert!(!args.no_fail_on_missing);
+            }
+            _ => panic!("expected locate command"),
+        }
+    }
+
+    #[test]
+    fn locate_parses_missing_path_opt_out() {
+        let cli = Cli::try_parse_from([
+            "cowork",
+            "locate",
+            "--paths",
+            "src",
+            "--thing",
+            "CLI parser",
+            "--no-fail-on-missing",
+        ])
+        .expect("locate args should parse");
+
+        match cli.command {
+            Command::Locate(args) => {
+                assert!(!args.fail_on_missing);
+                assert!(args.no_fail_on_missing);
+            }
+            _ => panic!("expected locate command"),
+        }
+    }
+
+    #[test]
+    fn conflicting_missing_path_flags_fail_parse() {
+        let error = Cli::try_parse_from([
+            "cowork",
+            "ask",
+            "--paths",
+            "src",
+            "--question",
+            "Where is CLI parsing defined?",
+            "--fail-on-missing",
+            "--no-fail-on-missing",
+        ])
+        .expect_err("conflicting flags should fail");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn brief_conflicting_missing_path_flags_fail_parse() {
+        let error = Cli::try_parse_from([
+            "cowork",
+            "brief",
+            "--paths",
+            "src",
+            "--goal",
+            "trace CLI flow",
+            "--fail-on-missing",
+            "--no-fail-on-missing",
+        ])
+        .expect_err("conflicting flags should fail");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn locate_conflicting_missing_path_flags_fail_parse() {
+        let error = Cli::try_parse_from([
+            "cowork",
+            "locate",
+            "--paths",
+            "src",
+            "--thing",
+            "CLI parser",
+            "--fail-on-missing",
+            "--no-fail-on-missing",
+        ])
+        .expect_err("conflicting flags should fail");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 
     #[test]

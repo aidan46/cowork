@@ -91,7 +91,7 @@ cowork ask \
   [--recursive] \
   [--include <GLOB>] \
   [--exclude <GLOB>] \
-  [--fail-on-missing]
+  [--fail-on-missing | --no-fail-on-missing]
 ```
 
 ---
@@ -124,6 +124,10 @@ Rules:
 * unreadable files are reported
 * symbolic links are ignored by default
 * explicit file paths bypass `--include` filters
+* default behavior is strict: first missing path fails
+* `--no-fail-on-missing` skips only missing paths
+* existing directories still require `--recursive`
+* if no readable UTF-8 text files survive load, return `NO_INPUT_FILES`
 
 Default excluded directories:
 
@@ -243,11 +247,33 @@ Example:
 
 Fail if any provided path does not exist.
 
+This is accepted as explicit strict mode.
+
 Default:
 
 ```txt
 true
 ```
+
+Mixed paths:
+
+* if any path is missing, return the first missing path in input order
+* existing files still load normally
+* existing directories without `--recursive` still fail
+
+---
+
+## `--no-fail-on-missing`
+
+Skip missing provided paths and continue with existing inputs.
+
+Rules:
+
+* missing paths are ignored
+* existing files still load normally
+* existing directories without `--recursive` still fail
+* unreadable files still report read errors
+* skipped binary or non-UTF-8 files are not treated as missing
 
 ---
 
@@ -423,7 +449,6 @@ Example:
 3  max bytes exceeded
 4  model request failed
 5  response parse failed
-6  no usable input files
 ```
 
 ---
@@ -491,6 +516,14 @@ If the total input exceeds `--max-bytes`:
 MVP assumes UTF-8 text files.
 
 Unsupported encodings are skipped.
+
+If candidate discovery and load leave zero readable UTF-8 text files:
+
+* return structured error
+* error code is `NO_INPUT_FILES`
+* message is `no readable UTF-8 text input files found`
+* exit code is `2`
+* fail before config lookup or model request
 
 ---
 

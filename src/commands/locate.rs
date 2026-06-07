@@ -54,9 +54,12 @@ fn run_locate_json_in(
         recursive,
         include,
         exclude,
-        fail_on_missing: _,
+        fail_on_missing,
+        no_fail_on_missing,
     } = args;
-    let candidate_paths = collect_ask_candidates(&paths, recursive, &include, &exclude)?;
+    let fail_on_missing = fail_on_missing || !no_fail_on_missing;
+    let candidate_paths =
+        collect_ask_candidates(&paths, recursive, &include, &exclude, fail_on_missing)?;
     let loaded_files = load_ask_files(&candidate_paths, max_bytes)?;
     let prompt = render_locate_prompt(&thing, &loaded_files);
     let config = resolve_ask_config(project_dir, home_dir, model, host)?;
