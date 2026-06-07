@@ -109,9 +109,12 @@ mod tests {
         let rules = render_init_rules("codex");
 
         assert!(rules.contains("# cowork rules for Codex"));
+        assert!(rules.contains("cowork locate"));
         assert!(rules.contains("cowork ask"));
-        assert!(rules.contains("cowork doctor"));
+        assert!(rules.contains("cowork brief"));
+        assert!(rules.contains("evidence"));
         assert!(rules.contains("next_reads"));
+        assert!(rules.contains("cowork doctor"));
         assert!(rules.contains("lead, not authority"));
     }
 
@@ -120,9 +123,12 @@ mod tests {
         let rules = render_init_rules("claude");
 
         assert!(rules.contains("# cowork rules for Claude"));
+        assert!(rules.contains("cowork locate"));
         assert!(rules.contains("cowork ask"));
-        assert!(rules.contains("cowork doctor"));
+        assert!(rules.contains("cowork brief"));
+        assert!(rules.contains("evidence"));
         assert!(rules.contains("next_reads"));
+        assert!(rules.contains("cowork doctor"));
         assert!(rules.contains("lead, not authority"));
     }
 
@@ -133,6 +139,10 @@ mod tests {
         assert!(block.contains("<!-- cowork:init:start agent=codex -->"));
         assert!(block.contains("<!-- cowork:init:end agent=codex -->"));
         assert!(block.contains("# cowork rules for Codex"));
+        assert!(block.contains("cowork locate"));
+        assert!(block.contains("cowork brief"));
+        assert!(block.contains("evidence"));
+        assert!(block.contains("next_reads"));
     }
 
     #[test]
@@ -146,6 +156,10 @@ mod tests {
         assert!(updated.starts_with("before\n\n"));
         assert!(updated.ends_with("\n\nafter\n"));
         assert!(!updated.contains("\nold\n"));
+        assert!(updated.contains("cowork locate"));
+        assert!(updated.contains("cowork brief"));
+        assert!(updated.contains("evidence"));
+        assert!(updated.contains("next_reads"));
         assert_eq!(
             updated
                 .matches("<!-- cowork:init:start agent=codex -->")
