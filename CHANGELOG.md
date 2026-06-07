@@ -4,6 +4,19 @@ All notable changes to `cowork` land here.
 
 ## Unreleased
 
+## v0.3.0, 2026-06-07
+
+### Added
+
+- `cowork brief` for compact, goal-focused context packs
+- documented `locate` then `brief` workflow for cloud-agent handoff
+- generated Codex and Claude init rules teaching when to use `locate` and `brief`
+
+### Changed
+
+- CLI now owns byte counts, duration, output size, and meaningful compression ratios
+- `cowork ask` normalizes model rows and caps response collections for stable output
+
 ## v0.2.0, 2026-05-21
 
 ### Added
