@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{DOCTOR_COMMAND, SCHEMA_VERSION, STATUS_ERROR, STATUS_OK};
+use super::{CommandId, SCHEMA_VERSION, STATUS_ERROR, STATUS_OK};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// Doctor command output.
@@ -8,7 +8,7 @@ pub(crate) struct DoctorOutput {
     /// JSON schema version.
     schema_version: &'static str,
     /// Command tag.
-    command: &'static str,
+    command: CommandId,
     /// Output status.
     status: &'static str,
     /// Check list.
@@ -21,7 +21,7 @@ impl DoctorOutput {
     pub(crate) fn ok(checks: Vec<DoctorCheck>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
-            command: DOCTOR_COMMAND,
+            command: CommandId::Doctor,
             status: STATUS_OK,
             checks,
         }
@@ -32,7 +32,7 @@ impl DoctorOutput {
     pub(crate) fn error(checks: Vec<DoctorCheck>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
-            command: DOCTOR_COMMAND,
+            command: CommandId::Doctor,
             status: STATUS_ERROR,
             checks,
         }

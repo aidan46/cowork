@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 /// Ask output parse.
 mod ask;
@@ -17,24 +17,54 @@ mod setup;
 
 /// Shared schema version.
 const SCHEMA_VERSION: &str = "1.0";
-/// `ask` command tag.
-const ASK_COMMAND: &str = "ask";
-/// `brief` command tag.
-const BRIEF_COMMAND: &str = "brief";
-/// CLI command tag.
-const CLI_COMMAND: &str = "cli";
-/// `doctor` command tag.
-const DOCTOR_COMMAND: &str = "doctor";
-/// `init` command tag.
-const INIT_COMMAND: &str = "init";
-/// `locate` command tag.
-const LOCATE_COMMAND: &str = "locate";
-/// `setup` command tag.
-const SETUP_COMMAND: &str = "setup";
 /// Success status tag.
 const STATUS_OK: &str = "ok";
 /// Error status tag.
 const STATUS_ERROR: &str = "error";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Closed command identifier.
+pub(crate) enum CommandId {
+    /// CLI parser.
+    Cli,
+    /// Ask command.
+    Ask,
+    /// Brief command.
+    Brief,
+    /// Locate command.
+    Locate,
+    /// Doctor command.
+    Doctor,
+    /// Setup command.
+    Setup,
+    /// Init command.
+    Init,
+}
+
+impl CommandId {
+    #[must_use]
+    /// Return stable command tag.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Ask => "ask",
+            Self::Brief => "brief",
+            Self::Locate => "locate",
+            Self::Doctor => "doctor",
+            Self::Setup => "setup",
+            Self::Init => "init",
+        }
+    }
+}
+
+impl Serialize for CommandId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// CLI-owned command metadata.
@@ -103,14 +133,29 @@ pub(crate) use setup::{
     SetupStatus,
 };
 
-#[must_use]
-/// Return CLI command tag.
-pub(crate) fn cli_command() -> &'static str {
-    CLI_COMMAND
-}
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::missing_panics_doc, reason = "test asserts")]
 
-#[must_use]
-/// Return init command tag.
-pub(crate) fn init_command() -> &'static str {
-    INIT_COMMAND
+    use super::CommandId;
+
+    #[test]
+    fn command_ids_serialize_to_exact_tags() {
+        let cases = [
+            (CommandId::Cli, "\"cli\""),
+            (CommandId::Ask, "\"ask\""),
+            (CommandId::Brief, "\"brief\""),
+            (CommandId::Locate, "\"locate\""),
+            (CommandId::Doctor, "\"doctor\""),
+            (CommandId::Setup, "\"setup\""),
+            (CommandId::Init, "\"init\""),
+        ];
+
+        for (command, expected) in cases {
+            assert_eq!(
+                serde_json::to_string(&command).expect("command should serialize"),
+                expected
+            );
+        }
+    }
 }

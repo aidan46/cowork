@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 
 use super::{
-    CommandMetadata, LOCATE_COMMAND, SCHEMA_VERSION, STATUS_OK,
+    CommandId, CommandMetadata, SCHEMA_VERSION, STATUS_OK,
     bounds::{MAX_MODEL_STRING_CHARS, NormalizationNotes, cap_rows, truncate_model_string},
 };
 
@@ -31,7 +31,7 @@ pub(crate) struct LocateOutput {
     /// JSON schema version.
     schema_version: &'static str,
     /// Command tag.
-    command: &'static str,
+    command: CommandId,
     /// Output status.
     status: &'static str,
     /// Candidate matches.
@@ -120,7 +120,7 @@ impl LocateOutput {
 
         Self {
             schema_version: SCHEMA_VERSION,
-            command: LOCATE_COMMAND,
+            command: CommandId::Locate,
             status: STATUS_OK,
             matches,
             next_reads,

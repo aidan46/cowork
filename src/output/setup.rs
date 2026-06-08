@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::error::AppError;
 
-use super::{SCHEMA_VERSION, SETUP_COMMAND};
+use super::{CommandId, SCHEMA_VERSION};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// Setup command output.
@@ -10,7 +10,7 @@ pub(crate) struct SetupOutput {
     /// JSON schema version.
     schema_version: &'static str,
     /// Command tag.
-    command: &'static str,
+    command: CommandId,
     /// Output status.
     status: SetupStatus,
     /// Check list.
@@ -108,7 +108,7 @@ impl SetupOutput {
     fn new(status: SetupStatus, checks: Vec<SetupCheck>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
-            command: SETUP_COMMAND,
+            command: CommandId::Setup,
             status,
             checks,
             recommendation: None,
