@@ -195,10 +195,10 @@ pub(crate) struct SetupRecommendation {
     reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     /// Confidence tag.
-    confidence: Option<String>,
+    confidence: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     /// Hardware class tag.
-    hardware_class: Option<String>,
+    hardware_class: Option<&'static str>,
 }
 
 impl SetupRecommendation {
@@ -220,15 +220,15 @@ impl SetupRecommendation {
 
     #[must_use]
     /// Set confidence tag.
-    pub(crate) fn with_confidence(mut self, confidence: impl Into<String>) -> Self {
-        self.confidence = Some(confidence.into());
+    pub(crate) fn with_confidence(mut self, confidence: &'static str) -> Self {
+        self.confidence = Some(confidence);
         self
     }
 
     #[must_use]
     /// Set hardware class tag.
-    pub(crate) fn with_hardware_class(mut self, hardware_class: impl Into<String>) -> Self {
-        self.hardware_class = Some(hardware_class.into());
+    pub(crate) fn with_hardware_class(mut self, hardware_class: &'static str) -> Self {
+        self.hardware_class = Some(hardware_class);
         self
     }
 }
@@ -283,7 +283,7 @@ impl SetupAction {
 /// Setup config row.
 pub(crate) struct SetupConfig {
     /// Config target.
-    target: String,
+    target: &'static str,
     /// Config path.
     path: String,
     /// Write flag.
@@ -296,13 +296,13 @@ impl SetupConfig {
     #[must_use]
     /// Build config row.
     pub(crate) fn new(
-        target: impl Into<String>,
+        target: &'static str,
         path: impl Into<String>,
         write_requested: bool,
         force: bool,
     ) -> Self {
         Self {
-            target: target.into(),
+            target,
             path: path.into(),
             write_requested,
             force,
