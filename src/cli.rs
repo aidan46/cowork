@@ -27,6 +27,8 @@ pub enum Command {
     Locate(LocateArgs),
     /// Check local setup for `ask`.
     Doctor(DoctorArgs),
+    /// Dry-run local setup discovery.
+    Setup(SetupArgs),
     /// Print agent install rules.
     #[command(arg_required_else_help = true)]
     Init(InitArgs),
@@ -176,6 +178,14 @@ pub struct DoctorArgs {
     pub host: Option<String>,
 }
 
+/// Args for `cowork setup`.
+#[derive(Debug, Args)]
+pub struct SetupArgs {
+    /// Host override.
+    #[arg(long, value_name = "HOST")]
+    pub host: Option<String>,
+}
+
 /// Args for `cowork init`.
 #[derive(Debug, Args)]
 pub struct InitArgs {
@@ -252,6 +262,7 @@ mod tests {
             Command::Brief(_) => panic!("expected ask command"),
             Command::Locate(_) => panic!("expected ask command"),
             Command::Doctor(_) => panic!("expected ask command"),
+            Command::Setup(_) => panic!("expected ask command"),
             Command::Init(_) => panic!("expected ask command"),
         }
     }
@@ -289,6 +300,7 @@ mod tests {
             Command::Ask(_) => panic!("expected brief command"),
             Command::Locate(_) => panic!("expected brief command"),
             Command::Doctor(_) => panic!("expected brief command"),
+            Command::Setup(_) => panic!("expected brief command"),
             Command::Init(_) => panic!("expected brief command"),
         }
     }
@@ -326,6 +338,7 @@ mod tests {
             Command::Ask(_) => panic!("expected locate command"),
             Command::Brief(_) => panic!("expected locate command"),
             Command::Doctor(_) => panic!("expected locate command"),
+            Command::Setup(_) => panic!("expected locate command"),
             Command::Init(_) => panic!("expected locate command"),
         }
     }
@@ -543,6 +556,7 @@ mod tests {
             Command::Ask(_) => panic!("expected doctor command"),
             Command::Brief(_) => panic!("expected doctor command"),
             Command::Locate(_) => panic!("expected doctor command"),
+            Command::Setup(_) => panic!("expected doctor command"),
             Command::Init(_) => panic!("expected doctor command"),
         }
     }
@@ -562,6 +576,29 @@ mod tests {
         let help = String::from_utf8(help).expect("help should be utf-8");
 
         assert!(help.contains("--model <MODEL>"));
+        assert!(help.contains("--host <HOST>"));
+    }
+
+    #[test]
+    fn setup_parses_with_no_args() {
+        let cli = Cli::try_parse_from(["cowork", "setup"]).expect("setup args should parse");
+
+        match cli.command {
+            Command::Setup(args) => {
+                assert_eq!(args.host, None);
+            }
+            Command::Ask(_) => panic!("expected setup command"),
+            Command::Brief(_) => panic!("expected setup command"),
+            Command::Locate(_) => panic!("expected setup command"),
+            Command::Doctor(_) => panic!("expected setup command"),
+            Command::Init(_) => panic!("expected setup command"),
+        }
+    }
+
+    #[test]
+    fn setup_help_shows_host_flag() {
+        let help = command_help("setup");
+
         assert!(help.contains("--host <HOST>"));
     }
 

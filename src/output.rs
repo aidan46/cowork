@@ -12,7 +12,6 @@ mod doctor;
 mod init;
 /// Locate output parse.
 mod locate;
-#[allow(dead_code, reason = "setup command lands later")]
 /// Setup output parse.
 mod setup;
 
@@ -30,7 +29,6 @@ const DOCTOR_COMMAND: &str = "doctor";
 const INIT_COMMAND: &str = "init";
 /// `locate` command tag.
 const LOCATE_COMMAND: &str = "locate";
-#[allow(dead_code, reason = "setup command lands later")]
 /// `setup` command tag.
 const SETUP_COMMAND: &str = "setup";
 /// Success status tag.
@@ -100,9 +98,9 @@ pub(crate) use brief::parse_brief_output;
 pub(crate) use doctor::{DoctorCheck, DoctorOutput, parse_doctor_probe};
 pub(crate) use init::{init_target_file, render_init_rules, update_init_managed_block};
 pub(crate) use locate::parse_locate_output;
-#[allow(unused_imports, reason = "setup command wires later")]
 pub(crate) use setup::{
     SetupAction, SetupCheck, SetupConfig, SetupMetadata, SetupOutput, SetupRecommendation,
+    SetupStatus,
 };
 
 #[must_use]

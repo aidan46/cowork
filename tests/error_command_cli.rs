@@ -168,6 +168,22 @@ fn conflicting_missing_path_flags_report_cli_command() {
     assert_eq!(json["error"]["code"], "INVALID_ARGUMENTS");
 }
 
+#[test]
+fn setup_runtime_error_reports_setup_command() {
+    let dirs = test_dirs("setup-runtime-error");
+    fs::write(dirs.project.join("cowork.toml"), "[ask\n").expect("malformed config should write");
+
+    let output = run_command(&dirs.project, &dirs.home, &["setup"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+
+    let json = parse_stdout(&output.stdout);
+    assert_eq!(json["command"], "setup");
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "INVALID_ARGUMENTS");
+}
+
 fn run_command(project_dir: &Path, home_dir: &Path, args: &[&str]) -> std::process::Output {
     Command::cargo_bin("cowork")
         .expect("binary should build")
