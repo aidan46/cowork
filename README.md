@@ -23,13 +23,9 @@ When agent or script needs one repo-grounded answer, whole-repo scans and raw fi
 
 ## Quickstart
 
-Current install path is Git source install. No crates.io package or prebuilt binaries yet.
+Current release path is source checkout only. No crates.io package or prebuilt binaries yet.
 
-Install:
-
-```bash
-cargo install --git https://github.com/aidan46/cowork --locked
-```
+Examples below assume `cowork` binary already exists from local source build.
 
 Need:
 
@@ -39,7 +35,7 @@ Need:
 - one `--question`
 - `--model`, unless config already sets it
 
-Verify install:
+Verify setup:
 
 ```bash
 cowork doctor --model your-model
@@ -73,9 +69,16 @@ Or locate first, then decide what to read:
 ```bash
 cowork locate \
   --paths src \
+  --recursive \
   --thing "CLI parser" \
   --model your-model
 ```
+
+Path handling defaults to strict mode:
+
+- missing provided path returns JSON error code `MISSING_PATH`
+- `--no-fail-on-missing` skips only missing paths, then continues with surviving inputs
+- if load ends with zero readable UTF-8 text files, command returns `NO_INPUT_FILES`
 
 ## Token-saving workflow
 
@@ -109,6 +112,9 @@ cowork brief \
   --model your-model > brief.json
 ```
 
+Errors stay JSON on stdout too. Top-level `command` tells scripts whether failure came from
+`ask`, `brief`, `locate`, or fallback `cli`.
+
 Cloud-agent handoff block:
 
 ```txt
@@ -120,7 +126,9 @@ If context is thin or stale, read source files directly before changing code.
 
 Notes:
 
-- `metadata.input_bytes` is byte count, not exact token count
+- `metadata.input_bytes` is loaded input byte count, not exact token count
+- `metadata.output_bytes` is final JSON byte count after CLI normalization
+- `risks` can include CLI-added `unknown` notices when output caps or string truncation fire
 - inspect cited evidence before edits, not only model summary
 - `cowork` is for narrow repo questions, not whole-repo architecture sweeps
 - skip `cowork` when you already know exact files and need direct source reading or broad refactor validation
@@ -156,8 +164,11 @@ Supported keys:
 - directory paths need `--recursive`
 - `--include` and `--exclude` filter discovered files
 - explicit file args bypass `--include`, but still respect `--exclude`
+- missing paths fail by default with `MISSING_PATH`
+- `--no-fail-on-missing` skips only missing paths
 - `--max-bytes` fails hard when loaded input grows past limit
 - symlinks, binary files, and non-UTF-8 files are skipped
+- if no readable UTF-8 text files survive load, commands fail with `NO_INPUT_FILES`
 - recursive walks prune `.git`, `target`, `node_modules`, `dist`, `build`, `.next`, `.cache`, and `coverage`
 
 ## Example output
@@ -189,10 +200,17 @@ Example success shape:
   "next_reads": [],
   "metadata": {
     "input_bytes": 5293,
+    "output_bytes": 612,
     "duration_ms": 12
   }
 }
 ```
+
+Notes:
+
+- `metadata.output_bytes` is final JSON byte count after normalization
+- `risks` may include CLI-owned `unknown` notices when output caps or truncation fire
+- error responses keep same top-level `schema_version`, `command`, and `status` framing
 
 ## Scope today
 
@@ -200,6 +218,7 @@ Example success shape:
 - `init --print` prints short agent rules
 - `init --write` writes bounded managed blocks to `AGENTS.md` or `CLAUDE.md`
 - JSON stdout only, even on errors
+- local-model summaries stay advisory, and bounded outputs may add CLI-owned risk notices
 - one Ollama-style model client
 - no cache, daemon, or index layer
 
