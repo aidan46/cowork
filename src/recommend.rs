@@ -174,6 +174,221 @@ impl HardwareClass {
     }
 }
 
+/// Built-in model facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ModelCandidate {
+    /// Ollama pull name.
+    model: &'static str,
+    /// Max hardware fit tier.
+    fit_rank: u8,
+    /// Coding preference inside same fit tier.
+    coding_rank: u8,
+}
+
+/// Recommendation origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecommendationSource {
+    /// Reused installed model.
+    Installed,
+    /// Fell back to built-in table.
+    BuiltIn,
+}
+
+impl RecommendationSource {
+    /// Stable `snake_case` tag.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Installed => "installed",
+            Self::BuiltIn => "built_in",
+        }
+    }
+}
+
+/// Recommendation confidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecommendationConfidence {
+    /// Hardware facts weak.
+    Low,
+    /// Hardware fit usable.
+    Medium,
+    /// Hardware fit strong.
+    High,
+}
+
+impl RecommendationConfidence {
+    /// Stable `snake_case` tag.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
+/// Pure model choice result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModelRecommendation {
+    /// Chosen Ollama pull name.
+    model: &'static str,
+    /// Choice origin.
+    source: RecommendationSource,
+    /// Classified hardware bucket.
+    hardware_class: HardwareClass,
+    /// True when chosen model missing.
+    needs_pull: bool,
+    /// Confidence tag for output.
+    confidence: RecommendationConfidence,
+    /// Short fit reason.
+    why: &'static str,
+}
+
+/// Curated built-in candidates.
+const MODEL_CANDIDATES: [ModelCandidate; 4] = [
+    ModelCandidate {
+        model: "qwen2.5-coder:3b",
+        fit_rank: 0,
+        coding_rank: 0,
+    },
+    ModelCandidate {
+        model: "qwen2.5-coder:7b",
+        fit_rank: 1,
+        coding_rank: 1,
+    },
+    ModelCandidate {
+        model: "qwen2.5-coder:14b",
+        fit_rank: 2,
+        coding_rank: 2,
+    },
+    ModelCandidate {
+        model: "qwen2.5-coder:32b",
+        fit_rank: 3,
+        coding_rank: 3,
+    },
+];
+
+/// Recommend model from facts and installed names.
+pub(crate) fn recommend_model(
+    facts: &HardwareFacts,
+    installed_models: &[String],
+) -> ModelRecommendation {
+    let hardware_class = classify_hardware(facts);
+    let built_in = built_in_candidate(hardware_class);
+
+    if let Some(installed) = best_installed_candidate(hardware_class, installed_models) {
+        return ModelRecommendation {
+            model: installed.model,
+            source: RecommendationSource::Installed,
+            hardware_class,
+            needs_pull: false,
+            confidence: confidence_for_class(hardware_class),
+            why: why_for_class(hardware_class),
+        };
+    }
+
+    ModelRecommendation {
+        model: built_in.model,
+        source: RecommendationSource::BuiltIn,
+        hardware_class,
+        needs_pull: true,
+        confidence: confidence_for_class(hardware_class),
+        why: why_for_class(hardware_class),
+    }
+}
+
+/// Map hardware class to built-in candidate.
+const fn built_in_candidate(class: HardwareClass) -> ModelCandidate {
+    match class {
+        HardwareClass::Unknown | HardwareClass::CpuSmall | HardwareClass::NvidiaUnder8Gb => {
+            MODEL_CANDIDATES[0]
+        }
+        HardwareClass::CpuStandard
+        | HardwareClass::AppleSiliconSmall
+        | HardwareClass::Nvidia8Gb => MODEL_CANDIDATES[1],
+        HardwareClass::AppleSiliconMedium
+        | HardwareClass::AppleSiliconLarge
+        | HardwareClass::Nvidia16Gb => MODEL_CANDIDATES[2],
+        HardwareClass::Nvidia24GbPlus => MODEL_CANDIDATES[3],
+    }
+}
+
+/// Pick best acceptable installed candidate.
+fn best_installed_candidate(
+    hardware_class: HardwareClass,
+    installed_models: &[String],
+) -> Option<ModelCandidate> {
+    MODEL_CANDIDATES
+        .iter()
+        .copied()
+        .filter(|candidate| candidate_acceptable_for_class(*candidate, hardware_class))
+        .filter(|candidate| {
+            installed_models
+                .iter()
+                .any(|model| model == candidate.model)
+        })
+        .max_by_key(|candidate| (candidate.fit_rank, candidate.coding_rank, candidate.model))
+}
+
+/// Check if candidate fits class.
+const fn candidate_acceptable_for_class(
+    candidate: ModelCandidate,
+    hardware_class: HardwareClass,
+) -> bool {
+    if matches!(hardware_class, HardwareClass::Unknown) {
+        return candidate.fit_rank == 0;
+    }
+
+    candidate.fit_rank <= hardware_class_rank(hardware_class)
+}
+
+/// Collapse class into fit rank.
+const fn hardware_class_rank(class: HardwareClass) -> u8 {
+    match class {
+        HardwareClass::Unknown => 0,
+        HardwareClass::CpuSmall => 0,
+        HardwareClass::CpuStandard => 1,
+        HardwareClass::AppleSiliconSmall => 1,
+        HardwareClass::AppleSiliconMedium => 2,
+        HardwareClass::AppleSiliconLarge => 2,
+        HardwareClass::NvidiaUnder8Gb => 0,
+        HardwareClass::Nvidia8Gb => 1,
+        HardwareClass::Nvidia16Gb => 2,
+        HardwareClass::Nvidia24GbPlus => 3,
+    }
+}
+
+/// Map class to confidence.
+const fn confidence_for_class(class: HardwareClass) -> RecommendationConfidence {
+    match class {
+        HardwareClass::Unknown => RecommendationConfidence::Low,
+        HardwareClass::CpuSmall | HardwareClass::CpuStandard | HardwareClass::NvidiaUnder8Gb => {
+            RecommendationConfidence::Medium
+        }
+        HardwareClass::AppleSiliconSmall
+        | HardwareClass::AppleSiliconMedium
+        | HardwareClass::AppleSiliconLarge
+        | HardwareClass::Nvidia8Gb
+        | HardwareClass::Nvidia16Gb
+        | HardwareClass::Nvidia24GbPlus => RecommendationConfidence::High,
+    }
+}
+
+/// Short fit reason.
+const fn why_for_class(class: HardwareClass) -> &'static str {
+    match class {
+        HardwareClass::Unknown => "safe small fallback for unknown hardware",
+        HardwareClass::CpuSmall => "small model fits lower-RAM CPU systems",
+        HardwareClass::CpuStandard => "mid-size model fits standard CPU RAM",
+        HardwareClass::AppleSiliconSmall => "mid-size model fits smaller Apple unified RAM",
+        HardwareClass::AppleSiliconMedium => "larger model fits medium Apple unified RAM",
+        HardwareClass::AppleSiliconLarge => "larger model fits large Apple unified RAM",
+        HardwareClass::NvidiaUnder8Gb => "small model fits limited NVIDIA VRAM",
+        HardwareClass::Nvidia8Gb => "mid-size model fits 8 GB NVIDIA VRAM",
+        HardwareClass::Nvidia16Gb => "larger model fits 16 GB NVIDIA VRAM",
+        HardwareClass::Nvidia24GbPlus => "largest model fits 24 GB plus NVIDIA VRAM",
+    }
+}
+
 /// Classify hardware facts.
 pub(crate) fn classify_hardware(facts: &HardwareFacts) -> HardwareClass {
     if let Some(vram_bytes) = facts.nvidia_vram_bytes {
@@ -222,8 +437,9 @@ mod tests {
     #![allow(clippy::missing_panics_doc, reason = "test asserts and fixtures")]
 
     use super::{
-        GIB, HardwareClass, HardwareFacts, MIB, classify_hardware, collect_hardware_facts,
-        parse_linux_mem_total_bytes, parse_macos_memsize_bytes, parse_nvidia_smi_vram_bytes,
+        GIB, HardwareClass, HardwareFacts, MIB, RecommendationConfidence, RecommendationSource,
+        classify_hardware, collect_hardware_facts, parse_linux_mem_total_bytes,
+        parse_macos_memsize_bytes, parse_nvidia_smi_vram_bytes, recommend_model,
     };
 
     fn facts(
@@ -448,6 +664,169 @@ mod tests {
 
         for (class, tag) in cases {
             assert_eq!(class.as_str(), tag);
+        }
+    }
+
+    #[test]
+    fn unknown_hardware_recommends_safe_small_default() {
+        let recommendation = recommend_model(&facts("linux", "x86_64", None, None), &[]);
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:3b");
+        assert_eq!(recommendation.hardware_class, HardwareClass::Unknown);
+        assert_eq!(recommendation.source, RecommendationSource::BuiltIn);
+        assert!(recommendation.needs_pull);
+        assert_eq!(recommendation.confidence, RecommendationConfidence::Low);
+        assert_eq!(
+            recommendation.why,
+            "safe small fallback for unknown hardware"
+        );
+    }
+
+    #[test]
+    fn cpu_small_recommends_3b() {
+        let recommendation = recommend_model(
+            &HardwareFacts::new("linux", "x86_64", Some(16 * GIB - 1), None),
+            &[],
+        );
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:3b");
+        assert_eq!(recommendation.hardware_class, HardwareClass::CpuSmall);
+    }
+
+    #[test]
+    fn cpu_standard_recommends_7b() {
+        let recommendation = recommend_model(&facts("linux", "x86_64", Some(16), None), &[]);
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:7b");
+        assert_eq!(recommendation.hardware_class, HardwareClass::CpuStandard);
+    }
+
+    #[test]
+    fn apple_medium_or_large_recommends_14b() {
+        let medium = recommend_model(&facts("macos", "aarch64", Some(16), None), &[]);
+        let large = recommend_model(&facts("macos", "aarch64", Some(24), None), &[]);
+
+        assert_eq!(medium.model, "qwen2.5-coder:14b");
+        assert_eq!(large.model, "qwen2.5-coder:14b");
+    }
+
+    #[test]
+    fn nvidia_8gb_recommends_7b() {
+        let recommendation = recommend_model(&facts("linux", "x86_64", None, Some(8)), &[]);
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:7b");
+        assert_eq!(recommendation.hardware_class, HardwareClass::Nvidia8Gb);
+    }
+
+    #[test]
+    fn nvidia_16gb_recommends_14b() {
+        let recommendation = recommend_model(&facts("linux", "x86_64", None, Some(16)), &[]);
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:14b");
+        assert_eq!(recommendation.hardware_class, HardwareClass::Nvidia16Gb);
+    }
+
+    #[test]
+    fn nvidia_24gb_plus_recommends_32b() {
+        let recommendation = recommend_model(&facts("linux", "x86_64", None, Some(24)), &[]);
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:32b");
+        assert_eq!(recommendation.hardware_class, HardwareClass::Nvidia24GbPlus);
+    }
+
+    #[test]
+    fn installed_acceptable_model_wins_over_pull() {
+        let recommendation = recommend_model(
+            &facts("linux", "x86_64", None, Some(16)),
+            &[
+                String::from("qwen2.5-coder:7b"),
+                String::from("qwen2.5-coder:14b"),
+            ],
+        );
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:14b");
+        assert_eq!(recommendation.source, RecommendationSource::Installed);
+        assert!(!recommendation.needs_pull);
+    }
+
+    #[test]
+    fn installed_too_large_model_is_ignored() {
+        let recommendation = recommend_model(
+            &facts("linux", "x86_64", None, Some(8)),
+            &[String::from("qwen2.5-coder:14b")],
+        );
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:7b");
+        assert_eq!(recommendation.source, RecommendationSource::BuiltIn);
+        assert!(recommendation.needs_pull);
+    }
+
+    #[test]
+    fn installed_unknown_model_is_ignored() {
+        let recommendation = recommend_model(
+            &facts("linux", "x86_64", None, Some(16)),
+            &[String::from("llama3.1:8b")],
+        );
+
+        assert_eq!(recommendation.model, "qwen2.5-coder:14b");
+        assert_eq!(recommendation.source, RecommendationSource::BuiltIn);
+        assert!(recommendation.needs_pull);
+    }
+
+    #[test]
+    fn installed_selection_is_deterministic_across_input_order() {
+        let facts = facts("linux", "x86_64", None, Some(24));
+        let first = recommend_model(
+            &facts,
+            &[
+                String::from("qwen2.5-coder:7b"),
+                String::from("qwen2.5-coder:14b"),
+            ],
+        );
+        let second = recommend_model(
+            &facts,
+            &[
+                String::from("qwen2.5-coder:14b"),
+                String::from("qwen2.5-coder:7b"),
+            ],
+        );
+
+        assert_eq!(first, second);
+        assert_eq!(first.model, "qwen2.5-coder:14b");
+    }
+
+    #[test]
+    fn needs_pull_false_only_when_chosen_model_installed() {
+        let built_in_installed = recommend_model(
+            &facts("linux", "x86_64", Some(16), None),
+            &[String::from("qwen2.5-coder:7b")],
+        );
+        let missing_built_in = recommend_model(&facts("linux", "x86_64", Some(16), None), &[]);
+
+        assert!(!built_in_installed.needs_pull);
+        assert_eq!(built_in_installed.source, RecommendationSource::Installed);
+        assert!(missing_built_in.needs_pull);
+        assert_eq!(missing_built_in.source, RecommendationSource::BuiltIn);
+    }
+
+    #[test]
+    fn recommendation_source_and_confidence_tags_stay_stable() {
+        let source_cases = [
+            (RecommendationSource::Installed, "installed"),
+            (RecommendationSource::BuiltIn, "built_in"),
+        ];
+        let confidence_cases = [
+            (RecommendationConfidence::Low, "low"),
+            (RecommendationConfidence::Medium, "medium"),
+            (RecommendationConfidence::High, "high"),
+        ];
+
+        for (source, tag) in source_cases {
+            assert_eq!(source.as_str(), tag);
+        }
+
+        for (confidence, tag) in confidence_cases {
+            assert_eq!(confidence.as_str(), tag);
         }
     }
 }
