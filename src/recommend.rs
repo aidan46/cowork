@@ -37,6 +37,7 @@ impl HardwareFacts {
     }
 
     /// Build facts for compile target.
+    #[cfg(test)]
     pub(crate) const fn current_platform() -> Self {
         Self::new(std::env::consts::OS, std::env::consts::ARCH, None, None)
     }
@@ -196,6 +197,7 @@ pub(crate) enum RecommendationSource {
 
 impl RecommendationSource {
     /// Stable `snake_case` tag.
+    #[cfg(test)]
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Installed => "installed",
@@ -241,6 +243,33 @@ pub(crate) struct ModelRecommendation {
     confidence: RecommendationConfidence,
     /// Short fit reason.
     why: &'static str,
+}
+
+impl ModelRecommendation {
+    /// Model tag.
+    pub(crate) const fn model(self) -> &'static str {
+        self.model
+    }
+
+    /// Pull needed.
+    pub(crate) const fn needs_pull(self) -> bool {
+        self.needs_pull
+    }
+
+    /// Confidence tag.
+    pub(crate) const fn confidence_tag(self) -> &'static str {
+        self.confidence.as_str()
+    }
+
+    /// Hardware class tag.
+    pub(crate) const fn hardware_class_tag(self) -> &'static str {
+        self.hardware_class.as_str()
+    }
+
+    /// Fit reason.
+    pub(crate) const fn why(self) -> &'static str {
+        self.why
+    }
 }
 
 /// Curated built-in candidates.

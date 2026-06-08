@@ -40,6 +40,7 @@ impl SetupOutput {
 
     #[must_use]
     /// Build error output.
+    #[cfg(test)]
     pub(crate) fn error(checks: Vec<SetupCheck>) -> Self {
         Self::new(SetupStatus::Error, checks)
     }
@@ -161,6 +162,7 @@ impl SetupCheck {
 
     #[must_use]
     /// Build skipped check.
+    #[cfg(test)]
     pub(crate) fn skipped(name: &'static str, message: impl Into<String>) -> Self {
         Self::new(name, SetupStatus::Skipped, message, None)
     }
@@ -270,6 +272,7 @@ impl SetupAction {
 
     #[must_use]
     /// Set path.
+    #[cfg(test)]
     pub(crate) fn with_path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
         self

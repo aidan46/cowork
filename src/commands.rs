@@ -14,6 +14,8 @@ mod doctor;
 mod init;
 /// Locate command run flow.
 mod locate;
+/// Setup command run flow.
+mod setup;
 
 #[cfg(test)]
 pub(crate) use ask::run_ask_json_in;
@@ -49,6 +51,7 @@ fn try_run() -> Result<ExitCode, AppError> {
         Command::Doctor(args) => {
             doctor::run_doctor(args).map_err(|error| error.with_command("doctor"))
         }
+        Command::Setup(args) => setup::run_setup(args).map_err(|error| error.with_command("setup")),
         Command::Init(args) => init::run_init(args).map_err(|error| error.with_command("init")),
     }
 }
