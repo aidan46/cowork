@@ -18,6 +18,9 @@ mod model;
 mod output;
 /// Model prompt render.
 mod prompt;
+/// Hardware recommendation helpers.
+#[allow(dead_code, reason = "setup command lands later")]
+mod recommend;
 
 pub use cli::{
     AskArgs, BriefArgs, Cli, Command, DoctorArgs, InitAgent, InitArgs, InitModeArgs, LocateArgs,
