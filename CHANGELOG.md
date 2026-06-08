@@ -4,6 +4,17 @@ All notable changes to `cowork` land here.
 
 ## Unreleased
 
+### Added
+
+- command-aware error JSON for `ask`, `brief`, `locate`, and fallback `cli`
+- `NO_INPUT_FILES` error when zero readable UTF-8 text files survive path loading
+
+### Changed
+
+- missing paths now fail by default, `--no-fail-on-missing` skips only missing paths
+- shared bounded output notices now apply to `ask`, `brief`, and `locate`
+- `metadata.output_bytes` now reports final JSON byte count after normalization
+
 ## v0.3.0, 2026-06-07
 
 ### Added
