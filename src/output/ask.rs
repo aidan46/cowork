@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-use super::{ASK_COMMAND, CommandMetadata, SCHEMA_VERSION, STATUS_OK};
+use super::{
+    ASK_COMMAND, CommandMetadata, SCHEMA_VERSION, STATUS_OK,
+    bounds::{MAX_MODEL_STRING_CHARS, NormalizationNotes, cap_rows, truncate_model_string},
+};
 
 /// Max file rows.
 const MAX_FILES: usize = 40;
@@ -16,10 +17,6 @@ const MAX_EVIDENCE: usize = 80;
 const MAX_RISKS: usize = 20;
 /// Max next-read rows.
 const MAX_NEXT_READS: usize = 20;
-/// Max model string chars.
-const MAX_MODEL_STRING_CHARS: usize = 1200;
-/// Truncation tail.
-const TRUNCATION_MARKER: &str = " [truncated]";
 /// Cap notice field order.
 const CAP_FIELD_ORDER: [&str; 5] = ["files", "symbols", "evidence", "risks", "next_reads"];
 /// Truncation notice field order.
@@ -149,12 +146,11 @@ impl AskOutput {
         risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         risks.dedup();
         if risks.len() + notes.notice_count() > MAX_RISKS {
-            let risk_keep =
-                MAX_RISKS.saturating_sub(notes.notice_count() + usize::from(!notes.has_caps()));
+            let risk_keep = notes.risk_rows_to_keep(MAX_RISKS);
             notes.note_risk_cap(risks.len(), risk_keep);
             risks.truncate(risk_keep);
         }
-        risks.extend(notes.into_risks());
+        inject_notice_risks(&mut risks, &notes);
         risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         risks.dedup();
 
@@ -418,110 +414,21 @@ impl AskRiskKind {
     }
 }
 
-/// Output change notes.
-#[derive(Default)]
-struct NormalizationNotes {
-    /// Cap messages by field.
-    caps: BTreeMap<&'static str, String>,
-    /// Truncation counts by field.
-    truncations: BTreeMap<&'static str, usize>,
-}
-
-impl NormalizationNotes {
-    /// True when cap notice row needed.
-    fn has_caps(&self) -> bool {
-        !self.caps.is_empty()
+/// Append CLI notice risks.
+fn inject_notice_risks(risks: &mut Vec<AskRisk>, notes: &NormalizationNotes) {
+    if notes.has_caps() {
+        risks.push(AskRisk::output_notice(format!(
+            "Output capped: {}.",
+            notes.cap_summary(&CAP_FIELD_ORDER)
+        )));
     }
 
-    /// Count injected notice rows.
-    fn notice_count(&self) -> usize {
-        usize::from(self.has_caps()) + usize::from(!self.truncations.is_empty())
+    if notes.has_truncations() {
+        risks.push(AskRisk::output_notice(format!(
+            "Output truncated at {MAX_MODEL_STRING_CHARS} chars: {}.",
+            notes.truncation_summary(&TRUNCATION_FIELD_ORDER)
+        )));
     }
-
-    /// Record capped array.
-    fn note_cap(&mut self, field: &'static str, before: usize, after: usize) {
-        if before > after {
-            self.caps
-                .insert(field, format!("{field} {before}->{after}"));
-        }
-    }
-
-    /// Record capped risk rows.
-    fn note_risk_cap(&mut self, before: usize, kept: usize) {
-        if before > kept {
-            self.caps
-                .insert("risks", format!("risks kept {kept} of {before} model rows"));
-        }
-    }
-
-    /// Record truncated string.
-    fn note_truncation(&mut self, field: &'static str) {
-        *self.truncations.entry(field).or_default() += 1;
-    }
-
-    /// Build output notice rows.
-    fn into_risks(self) -> Vec<AskRisk> {
-        let mut risks = Vec::new();
-
-        if !self.caps.is_empty() {
-            let capped_fields = CAP_FIELD_ORDER
-                .iter()
-                .filter_map(|field| self.caps.get(field))
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            risks.push(AskRisk::output_notice(format!(
-                "Output capped: {capped_fields}."
-            )));
-        }
-
-        if !self.truncations.is_empty() {
-            let truncated_fields = TRUNCATION_FIELD_ORDER
-                .iter()
-                .filter_map(|field| {
-                    self.truncations
-                        .get(field)
-                        .map(|count| format!("{field} x{count}"))
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            risks.push(AskRisk::output_notice(format!(
-                "Output truncated at {MAX_MODEL_STRING_CHARS} chars: {truncated_fields}."
-            )));
-        }
-
-        risks
-    }
-}
-
-/// Cap row count, note drop.
-fn cap_rows<T>(rows: &mut Vec<T>, field: &'static str, cap: usize, notes: &mut NormalizationNotes) {
-    let before = rows.len();
-    if before > cap {
-        rows.truncate(cap);
-        notes.note_cap(field, before, cap);
-    }
-}
-
-/// Truncate long model string.
-fn truncate_model_string(value: &mut String, field: &'static str, notes: &mut NormalizationNotes) {
-    if truncate_string(value) {
-        notes.note_truncation(field);
-    }
-}
-
-/// Truncate string at char limit.
-fn truncate_string(value: &mut String) -> bool {
-    let value_chars = value.chars().count();
-    if value_chars <= MAX_MODEL_STRING_CHARS {
-        return false;
-    }
-
-    let keep_chars = MAX_MODEL_STRING_CHARS - TRUNCATION_MARKER.chars().count();
-    let mut truncated = value.chars().take(keep_chars).collect::<String>();
-    truncated.push_str(TRUNCATION_MARKER);
-    *value = truncated;
-    true
 }
 
 /// Parse ask output JSON.

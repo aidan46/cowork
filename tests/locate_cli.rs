@@ -53,6 +53,40 @@ fn config_backed_success_returns_ok_json() {
 }
 
 #[test]
+fn bounded_success_sets_output_bytes_after_normalization() {
+    let dirs = test_dirs("bounded-success");
+    let content = "fn answer() -> u8 { 42 }\n";
+    let file = write_temp_file(&dirs.project, "input.rs", content);
+    let (host, handle) = spawn_server(ok_response(&response_envelope(&bounded_model_json())));
+
+    write_config(
+        &dirs.project.join("cowork.toml"),
+        &format!("[ask]\nmodel = \"gemma3:12b\"\nhost = \"{host}\"\n"),
+    );
+
+    let output = run_locate(
+        &dirs.project,
+        &dirs.home,
+        &[arg_path(&file), arg_thing("CLI parser")],
+    );
+
+    handle.join().expect("server should join");
+    assert_eq!(output.status.code(), Some(0));
+
+    let json = parse_stdout(&output.stdout);
+    let risks = json["risks"].as_array().expect("risks should be array");
+    let stdout_json = String::from_utf8(output.stdout.clone()).expect("stdout should be utf-8");
+
+    assert_eq!(
+        json["metadata"]["output_bytes"],
+        stdout_json.trim_end_matches('\n').len()
+    );
+    assert_eq!(risks.len(), 20);
+    assert_eq!(risks[18]["kind"], "unknown");
+    assert_eq!(risks[19]["kind"], "unknown");
+}
+
+#[test]
 fn strict_missing_path_returns_missing_path_error() {
     let dirs = test_dirs("strict-missing");
     let missing = dirs.project.join("missing.rs");
@@ -302,4 +336,45 @@ fn valid_model_json() -> String {
         ]
     })
     .to_string()
+}
+
+fn bounded_model_json() -> String {
+    let matches = (0..85)
+        .map(|index| {
+            json!({
+                "path": if index == 0 { long_string(1300) } else { format!("src/file-{index:02}.rs") },
+                "symbol": if index == 0 { long_string(1301) } else { format!("symbol_{index:02}") },
+                "kind": "function",
+                "reason": if index == 0 { long_string(1302) } else { format!("Reason {index:02}.") },
+                "confidence": if index % 2 == 0 { "high" } else { "medium" }
+            })
+        })
+        .collect::<Vec<_>>();
+    let next_reads = (0..25)
+        .map(|index| {
+            json!({
+                "path": if index == 0 { long_string(1303) } else { format!("src/next-{index:02}.rs") },
+                "reason": if index == 0 { long_string(1304) } else { format!("Next read {index:02}.") }
+            })
+        })
+        .collect::<Vec<_>>();
+    let risks = (0..25)
+        .map(|index| {
+            json!({
+                "kind": "missing_context",
+                "message": if index == 0 { long_string(1305) } else { format!("Risk {index:02}.") }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "matches": matches,
+        "next_reads": next_reads,
+        "risks": risks
+    })
+    .to_string()
+}
+
+fn long_string(len: usize) -> String {
+    "x".repeat(len)
 }

@@ -2,7 +2,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-use super::{CommandMetadata, LOCATE_COMMAND, SCHEMA_VERSION, STATUS_OK};
+use super::{
+    CommandMetadata, LOCATE_COMMAND, SCHEMA_VERSION, STATUS_OK,
+    bounds::{MAX_MODEL_STRING_CHARS, NormalizationNotes, cap_rows, truncate_model_string},
+};
+
+/// Max match rows.
+const MAX_MATCHES: usize = 80;
+/// Max risk rows.
+const MAX_RISKS: usize = 20;
+/// Max next-read rows.
+const MAX_NEXT_READS: usize = 20;
+/// Cap notice field order.
+const CAP_FIELD_ORDER: [&str; 3] = ["matches", "risks", "next_reads"];
+/// Truncation notice field order.
+const TRUNCATION_FIELD_ORDER: [&str; 6] = [
+    "matches.path",
+    "matches.symbol",
+    "matches.reason",
+    "next_reads.path",
+    "next_reads.reason",
+    "risks.message",
+];
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 /// Locate command output.
@@ -60,15 +81,40 @@ struct RawLocateOutput {
 
 impl LocateOutput {
     /// Add fixed fields and normalize order.
-    fn from_raw(value: RawLocateOutput, metadata: CommandMetadata) -> Self {
+    fn from_raw(mut value: RawLocateOutput, metadata: CommandMetadata) -> Self {
+        let mut notes = NormalizationNotes::default();
+
+        value
+            .matches
+            .iter_mut()
+            .for_each(|item| item.normalize(&mut notes));
+        value
+            .next_reads
+            .iter_mut()
+            .for_each(|item| item.normalize(&mut notes));
+        value
+            .risks
+            .iter_mut()
+            .for_each(|risk| risk.normalize(&mut notes));
+
         let mut matches = value.matches;
         let mut next_reads = value.next_reads;
         let mut risks = value.risks;
 
         matches.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         matches.dedup();
+        cap_rows(&mut matches, "matches", MAX_MATCHES, &mut notes);
         next_reads.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         next_reads.dedup();
+        cap_rows(&mut next_reads, "next_reads", MAX_NEXT_READS, &mut notes);
+        risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+        risks.dedup();
+        if risks.len() + notes.notice_count() > MAX_RISKS {
+            let risk_keep = notes.risk_rows_to_keep(MAX_RISKS);
+            notes.note_risk_cap(risks.len(), risk_keep);
+            risks.truncate(risk_keep);
+        }
+        inject_notice_risks(&mut risks, &notes);
         risks.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
         risks.dedup();
 
@@ -102,6 +148,15 @@ struct LocateMatch {
 }
 
 impl LocateMatch {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.path, "matches.path", notes);
+        if let Some(symbol) = &mut self.symbol {
+            truncate_model_string(symbol, "matches.symbol", notes);
+        }
+        truncate_model_string(&mut self.reason, "matches.reason", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (u8, &str, Option<&str>, Option<&str>, &str) {
         (
@@ -124,6 +179,12 @@ struct LocateNextRead {
 }
 
 impl LocateNextRead {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.path, "next_reads.path", notes);
+        truncate_model_string(&mut self.reason, "next_reads.reason", notes);
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str) {
         (self.path.as_str(), self.reason.as_str())
@@ -140,6 +201,19 @@ struct LocateRisk {
 }
 
 impl LocateRisk {
+    /// Truncate model string fields.
+    fn normalize(&mut self, notes: &mut NormalizationNotes) {
+        truncate_model_string(&mut self.message, "risks.message", notes);
+    }
+
+    /// Build output notice row.
+    fn output_notice(message: String) -> Self {
+        Self {
+            kind: LocateRiskKind::Unknown,
+            message,
+        }
+    }
+
     /// Build stable sort key.
     fn sort_key(&self) -> (&str, &str) {
         (self.kind.as_str(), self.message.as_str())
@@ -251,6 +325,23 @@ impl LocateRiskKind {
     }
 }
 
+/// Append CLI notice risks.
+fn inject_notice_risks(risks: &mut Vec<LocateRisk>, notes: &NormalizationNotes) {
+    if notes.has_caps() {
+        risks.push(LocateRisk::output_notice(format!(
+            "Output capped: {}.",
+            notes.cap_summary(&CAP_FIELD_ORDER)
+        )));
+    }
+
+    if notes.has_truncations() {
+        risks.push(LocateRisk::output_notice(format!(
+            "Output truncated at {MAX_MODEL_STRING_CHARS} chars: {}.",
+            notes.truncation_summary(&TRUNCATION_FIELD_ORDER)
+        )));
+    }
+}
+
 /// Parse locate output JSON.
 ///
 /// # Errors
@@ -274,7 +365,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::parse_locate_output;
+    use super::*;
     use crate::{error::AppError, output::CommandMetadata};
 
     #[test]
@@ -288,6 +379,43 @@ mod tests {
         assert_eq!(output.metadata.input_bytes, 12420);
         assert_eq!(output.metadata.duration_ms, 980);
         assert_eq!(output.metadata.output_bytes, 0);
+    }
+
+    #[test]
+    fn parsed_output_sorts_and_dedupes_rows() {
+        let output = parse_locate_output(&unsorted_duplicate_model_json(), metadata())
+            .expect("output should parse");
+
+        assert_eq!(
+            serde_json::to_value(&output.matches).expect("matches should serialize"),
+            json!([
+                {
+                    "path": "src/cli.rs",
+                    "symbol": "Command",
+                    "kind": "type",
+                    "reason": "Defines CLI command variants.",
+                    "confidence": "high"
+                },
+                {
+                    "path": "src/commands.rs",
+                    "reason": "Dispatches parsed subcommands.",
+                    "confidence": "medium"
+                }
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value(&output.next_reads).expect("next reads should serialize"),
+            json!([
+                {
+                    "path": "src/commands/ask.rs",
+                    "reason": "Shows current command run flow."
+                },
+                {
+                    "path": "src/output.rs",
+                    "reason": "Defines shared output metadata."
+                }
+            ])
+        );
     }
 
     #[test]
@@ -370,6 +498,88 @@ mod tests {
     }
 
     #[test]
+    fn parsed_output_caps_arrays_and_injects_cap_risk() {
+        let output =
+            parse_locate_output(&capped_model_json(), metadata()).expect("output should parse");
+
+        assert_eq!(output.matches.len(), 80);
+        assert_eq!(output.next_reads.len(), 20);
+        assert_eq!(output.risks.len(), 20);
+        assert!(output.risks.iter().any(|risk| {
+            risk == &LocateRisk {
+                kind: LocateRiskKind::Unknown,
+                message: "Output capped: matches 85->80, risks kept 19 of 25 model rows, next_reads 25->20.".to_string(),
+            }
+        }));
+    }
+
+    #[test]
+    fn serialized_json_truncates_long_strings_and_injects_truncation_risk() {
+        let output =
+            parse_locate_output(&truncated_model_json(), metadata()).expect("output should parse");
+        let value = serde_json::from_str::<serde_json::Value>(
+            &output.into_json().expect("output should serialize"),
+        )
+        .expect("json should parse");
+
+        assert_eq!(
+            value["matches"][0]["path"]
+                .as_str()
+                .map(|path| path.chars().count()),
+            Some(1200)
+        );
+        assert!(
+            value["matches"][0]["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with(" [truncated]"))
+        );
+        assert!(
+            value["matches"][0]["symbol"]
+                .as_str()
+                .is_some_and(|symbol| symbol.ends_with(" [truncated]"))
+        );
+        assert_eq!(
+            value["risks"][1],
+            json!({
+                "kind": "unknown",
+                "message": "Output truncated at 1200 chars: matches.path x1, matches.symbol x1, matches.reason x1, next_reads.path x1, next_reads.reason x1, risks.message x1."
+            })
+        );
+    }
+
+    #[test]
+    fn serialized_json_adds_both_notices_deterministically_and_stays_stable() {
+        let json = parse_locate_output(&bounded_model_json(), metadata())
+            .expect("output should parse")
+            .into_json()
+            .expect("output should serialize");
+        let json_again = parse_locate_output(&bounded_model_json(), metadata())
+            .expect("output should parse")
+            .into_json()
+            .expect("output should serialize");
+        let value = serde_json::from_str::<serde_json::Value>(&json).expect("json should parse");
+        let risks = value["risks"].as_array().expect("risks should be array");
+
+        assert_eq!(json, json_again);
+        assert_eq!(value["metadata"]["output_bytes"], json.len());
+        assert_eq!(risks.len(), 20);
+        assert_eq!(
+            risks[18],
+            json!({
+                "kind": "unknown",
+                "message": "Output capped: matches 85->80, risks kept 18 of 25 model rows, next_reads 25->20."
+            })
+        );
+        assert_eq!(
+            risks[19],
+            json!({
+                "kind": "unknown",
+                "message": "Output truncated at 1200 chars: matches.path x1, matches.symbol x1, matches.reason x1, next_reads.path x1, next_reads.reason x1, risks.message x1."
+            })
+        );
+    }
+
+    #[test]
     fn missing_required_field_maps_to_response_parse_failed() {
         let error = parse_locate_output(
             r#"{
@@ -434,6 +644,139 @@ mod tests {
             ]
         })
         .to_string()
+    }
+
+    fn unsorted_duplicate_model_json() -> String {
+        json!({
+            "matches": [
+                {
+                    "path": "src/commands.rs",
+                    "reason": "Dispatches parsed subcommands.",
+                    "confidence": "medium"
+                },
+                {
+                    "path": "src/cli.rs",
+                    "symbol": "Command",
+                    "kind": "type",
+                    "reason": "Defines CLI command variants.",
+                    "confidence": "high"
+                },
+                {
+                    "path": "src/cli.rs",
+                    "symbol": "Command",
+                    "kind": "type",
+                    "reason": "Defines CLI command variants.",
+                    "confidence": "high"
+                }
+            ],
+            "next_reads": [
+                {
+                    "path": "src/output.rs",
+                    "reason": "Defines shared output metadata."
+                },
+                {
+                    "path": "src/commands/ask.rs",
+                    "reason": "Shows current command run flow."
+                },
+                {
+                    "path": "src/output.rs",
+                    "reason": "Defines shared output metadata."
+                }
+            ],
+            "risks": [
+                {
+                    "kind": "missing_context",
+                    "message": "Loaded files do not include all command modules."
+                },
+                {
+                    "kind": "missing_context",
+                    "message": "Loaded files do not include all command modules."
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn capped_model_json() -> String {
+        let matches = (0..85)
+            .map(|index| {
+                json!({
+                    "path": format!("src/file-{index:02}.rs"),
+                    "symbol": format!("symbol_{index:02}"),
+                    "kind": "function",
+                    "reason": format!("Reason {index:02}."),
+                    "confidence": if index % 2 == 0 { "high" } else { "medium" }
+                })
+            })
+            .collect::<Vec<_>>();
+        let next_reads = (0..25)
+            .map(|index| {
+                json!({
+                    "path": format!("src/next-{index:02}.rs"),
+                    "reason": format!("Next read {index:02}.")
+                })
+            })
+            .collect::<Vec<_>>();
+        let risks = (0..25)
+            .map(|index| {
+                json!({
+                    "kind": "missing_context",
+                    "message": format!("Risk {index:02}.")
+                })
+            })
+            .collect::<Vec<_>>();
+
+        json!({
+            "matches": matches,
+            "next_reads": next_reads,
+            "risks": risks
+        })
+        .to_string()
+    }
+
+    fn truncated_model_json() -> String {
+        json!({
+            "matches": [
+                {
+                    "path": long_string(1300),
+                    "symbol": long_string(1301),
+                    "kind": "function",
+                    "reason": long_string(1302),
+                    "confidence": "high"
+                }
+            ],
+            "next_reads": [
+                {
+                    "path": long_string(1303),
+                    "reason": long_string(1304)
+                }
+            ],
+            "risks": [
+                {
+                    "kind": "missing_context",
+                    "message": long_string(1305)
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn bounded_model_json() -> String {
+        let mut value = serde_json::from_str::<serde_json::Value>(&capped_model_json())
+            .expect("capped json should parse");
+
+        value["matches"][0]["path"] = json!(long_string(1300));
+        value["matches"][0]["symbol"] = json!(long_string(1301));
+        value["matches"][0]["reason"] = json!(long_string(1302));
+        value["next_reads"][0]["path"] = json!(long_string(1303));
+        value["next_reads"][0]["reason"] = json!(long_string(1304));
+        value["risks"][0]["message"] = json!(long_string(1305));
+
+        value.to_string()
+    }
+
+    fn long_string(len: usize) -> String {
+        "x".repeat(len)
     }
 
     fn metadata() -> CommandMetadata {

@@ -2,6 +2,8 @@ use serde::Serialize;
 
 /// Ask output parse.
 mod ask;
+/// Shared output bounds.
+mod bounds;
 /// Brief output parse.
 mod brief;
 /// Doctor output parse.
