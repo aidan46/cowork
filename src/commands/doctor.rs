@@ -4,7 +4,7 @@ use crate::{
     DoctorArgs,
     config::resolve_ask_config,
     error::{AppError, DoctorExit},
-    model::{self, DoctorProbeErrorKind},
+    model::{self, DoctorProbeErrorKind, OllamaErrorKind},
     output::{DoctorCheck, DoctorOutput},
 };
 
@@ -60,6 +60,8 @@ fn run_doctor_json_in(
                 &[
                     "effective_model_chosen",
                     "host_url_parsed",
+                    "installed_models_listed",
+                    "effective_model_installed",
                     "generate_endpoint_reachable",
                     "tiny_json_probe_succeeds",
                     "probe_output_shape_valid",
@@ -87,13 +89,15 @@ fn run_doctor_json_in(
             checks.push(DoctorCheck::error(
                 "effective_model_chosen",
                 "No model found from CLI or `[ask].model` config.",
-                Some("Pass `--model` or set `[ask].model` in config."),
+                Some("Run `cowork setup --write-config`."),
             ));
             push_skipped_doctor_checks(
                 &mut checks,
                 "model missing, network checks skipped.",
                 &[
                     "host_url_parsed",
+                    "installed_models_listed",
+                    "effective_model_installed",
                     "generate_endpoint_reachable",
                     "tiny_json_probe_succeeds",
                     "probe_output_shape_valid",
@@ -114,6 +118,8 @@ fn run_doctor_json_in(
             &mut checks,
             "host invalid, later checks skipped.",
             &[
+                "installed_models_listed",
+                "effective_model_installed",
                 "generate_endpoint_reachable",
                 "tiny_json_probe_succeeds",
                 "probe_output_shape_valid",
@@ -126,6 +132,42 @@ fn run_doctor_json_in(
     checks.push(DoctorCheck::ok(
         "host_url_parsed",
         format!("Host URL parsed: `{}`.", config.host),
+    ));
+
+    let installed_models = match model::request_ollama_tags(&config.host) {
+        Ok(models) => models,
+        Err(error) => return doctor_tags_error_result(checks, error),
+    };
+    checks.push(DoctorCheck::ok(
+        "installed_models_listed",
+        format!("Listed {} installed Ollama models.", installed_models.len()),
+    ));
+
+    if !installed_models
+        .iter()
+        .any(|installed| installed.name == model)
+    {
+        checks.push(DoctorCheck::error(
+            "effective_model_installed",
+            format!("Effective model `{model}` is not installed."),
+            Some("Run `cowork setup --pull`."),
+        ));
+        push_skipped_doctor_checks(
+            &mut checks,
+            "effective model not installed, probe checks skipped.",
+            &[
+                "generate_endpoint_reachable",
+                "tiny_json_probe_succeeds",
+                "probe_output_shape_valid",
+            ],
+        );
+
+        return DoctorRunResult::error(checks, DoctorExit::ProbeRequestFailed);
+    }
+
+    checks.push(DoctorCheck::ok(
+        "effective_model_installed",
+        format!("Effective model `{model}` is installed."),
     ));
 
     let raw_probe = match model::request_doctor_probe(&config.host, model) {
@@ -161,6 +203,57 @@ fn run_doctor_json_in(
     ));
 
     DoctorRunResult::ok(checks)
+}
+
+/// Map tags error into checks and exit.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when doctor JSON output serialization fails.
+fn doctor_tags_error_result(
+    mut checks: Vec<DoctorCheck>,
+    error: model::OllamaError,
+) -> Result<DoctorRunResult, AppError> {
+    let (tag, hint, exit) = match error.kind {
+        OllamaErrorKind::BadHost => (
+            "bad_host",
+            "Pass `--host http://localhost:11434` or fix `[ask].host`.",
+            DoctorExit::BadHost,
+        ),
+        OllamaErrorKind::UnreachableHost => (
+            "unreachable_host",
+            "Start Ollama or check host, port, and firewall.",
+            DoctorExit::UnreachableHost,
+        ),
+        OllamaErrorKind::RequestFailed => (
+            "request_failed",
+            "Check Ollama `/api/tags` and host configuration.",
+            DoctorExit::ProbeRequestFailed,
+        ),
+        OllamaErrorKind::InvalidJson => (
+            "invalid_json",
+            "Ollama `/api/tags` must return valid JSON.",
+            DoctorExit::InvalidProbeJson,
+        ),
+    };
+
+    checks.push(DoctorCheck::error(
+        "installed_models_listed",
+        format!("Could not list installed Ollama models: {tag}."),
+        Some(hint),
+    ));
+    push_skipped_doctor_checks(
+        &mut checks,
+        "model listing failed, later checks skipped.",
+        &[
+            "effective_model_installed",
+            "generate_endpoint_reachable",
+            "tiny_json_probe_succeeds",
+            "probe_output_shape_valid",
+        ],
+    );
+
+    DoctorRunResult::error(checks, exit)
 }
 
 /// Map probe error into checks and exit.
