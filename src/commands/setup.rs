@@ -1,8 +1,13 @@
-use std::{env, path::Path, process::ExitCode, time::Instant};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::ExitCode,
+    time::Instant,
+};
 
 use crate::{
     SetupArgs,
-    config::{ResolvedAskConfig, resolve_ask_config},
+    config::{AskConfigWrite, ResolvedAskConfig, resolve_ask_config, write_ask_config},
     error::AppError,
     model::{self, OllamaErrorKind},
     output::{
@@ -11,6 +16,20 @@ use crate::{
     },
     recommend::{self, HardwareFacts},
 };
+
+/// Setup mutation options.
+struct SetupOptions {
+    /// Model came from CLI.
+    cli_model: bool,
+    /// Pull missing model.
+    pull_requested: bool,
+    /// Write chosen config.
+    write_requested: bool,
+    /// Use project config target.
+    project_target: bool,
+    /// Replace conflicting ask values.
+    force: bool,
+}
 
 /// Run setup and print JSON.
 ///
@@ -34,12 +53,32 @@ fn run_setup_json(args: SetupArgs) -> Result<String, AppError> {
         AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
     })?;
     let home_dir = env::var_os("HOME").map(std::path::PathBuf::from);
-    let SetupArgs { model, host, pull } = args;
+    let SetupArgs {
+        model,
+        host,
+        pull,
+        write_config,
+        user: _,
+        project,
+        force,
+    } = args;
     let cli_model = model.is_some();
     let config = resolve_ask_config(&project_dir, home_dir.as_deref(), model, host)?;
     let facts = recommend::collect_hardware_facts();
 
-    render_setup_json(config, home_dir.as_deref(), &facts, cli_model, pull)
+    render_setup_json(
+        config,
+        &project_dir,
+        home_dir.as_deref(),
+        &facts,
+        SetupOptions {
+            cli_model,
+            pull_requested: pull,
+            write_requested: write_config,
+            project_target: project,
+            force,
+        },
+    )
 }
 
 /// Run setup with explicit dirs and facts.
@@ -54,11 +93,31 @@ pub(crate) fn run_setup_json_in(
     home_dir: Option<&Path>,
     facts: &HardwareFacts,
 ) -> Result<String, AppError> {
-    let SetupArgs { model, host, pull } = args;
+    let SetupArgs {
+        model,
+        host,
+        pull,
+        write_config,
+        user: _,
+        project,
+        force,
+    } = args;
     let cli_model = model.is_some();
     let config = resolve_ask_config(project_dir, home_dir, model, host)?;
 
-    render_setup_json(config, home_dir, facts, cli_model, pull)
+    render_setup_json(
+        config,
+        project_dir,
+        home_dir,
+        facts,
+        SetupOptions {
+            cli_model,
+            pull_requested: pull,
+            write_requested: write_config,
+            project_target: project,
+            force,
+        },
+    )
 }
 
 /// Render setup from resolved config.
@@ -68,10 +127,10 @@ pub(crate) fn run_setup_json_in(
 /// Returns `AppError` on JSON output failure.
 fn render_setup_json(
     config: ResolvedAskConfig,
+    project_dir: &Path,
     home_dir: Option<&Path>,
     facts: &HardwareFacts,
-    cli_model: bool,
-    pull_requested: bool,
+    options: SetupOptions,
 ) -> Result<String, AppError> {
     let started = Instant::now();
     let mut checks = vec![
@@ -116,7 +175,7 @@ fn render_setup_json(
     let recommendation = recommend::recommend_model(facts, &installed_models);
     let (chosen_model, reason, confidence, hardware_class, selection_message, mut needs_pull) =
         match config.model.as_deref() {
-            Some(model) if cli_model => (
+            Some(model) if options.cli_model => (
                 model,
                 "Selected by `--model`.",
                 None,
@@ -147,7 +206,7 @@ fn render_setup_json(
             "Chosen model is already installed.".to_string(),
             false,
         )
-    } else if !pull_requested {
+    } else if !options.pull_requested {
         (
             SetupStatus::Skipped,
             "Pull not requested; chosen model remains missing.".to_string(),
@@ -182,7 +241,44 @@ fn render_setup_json(
         recommendation_row = recommendation_row.with_hardware_class(hardware_class);
     }
 
-    let output = if pull_failed {
+    let (config_target, config_path) =
+        config_target_path(project_dir, home_dir, options.project_target);
+    let config_path_text = config_path
+        .as_deref()
+        .map_or_else(String::new, |path| path.display().to_string());
+    let (config_status, config_message, config_failed) = if !options.write_requested {
+        (
+            SetupStatus::Skipped,
+            "Config write not requested.".to_string(),
+            false,
+        )
+    } else if let Some(path) = config_path.as_deref() {
+        match write_ask_config(path, chosen_model, &config.host, options.force) {
+            Ok(AskConfigWrite::Written) => (
+                SetupStatus::Ok,
+                "Wrote chosen model and host to config.".to_string(),
+                false,
+            ),
+            Ok(AskConfigWrite::Unchanged) => (
+                SetupStatus::Skipped,
+                "Config already contains chosen model and host.".to_string(),
+                false,
+            ),
+            Err(error) => (
+                SetupStatus::Error,
+                format!("Could not write config: {error}."),
+                true,
+            ),
+        }
+    } else {
+        (
+            SetupStatus::Error,
+            "Could not write config: HOME is not set.".to_string(),
+            true,
+        )
+    };
+
+    let output = if pull_failed || config_failed {
         SetupOutput::error(checks)
     } else {
         match status {
@@ -202,12 +298,15 @@ fn render_setup_json(
         SetupAction::new("model_selected", SetupStatus::Ok, selection_message)
             .with_model(chosen_model),
         SetupAction::new("model_pull", pull_status, pull_message).with_model(chosen_model),
+        SetupAction::new("config_write", config_status, config_message)
+            .with_model(chosen_model)
+            .with_path(&config_path_text),
     ])
     .with_config(SetupConfig::new(
-        "user",
-        default_user_config_path(home_dir),
-        false,
-        false,
+        config_target,
+        config_path_text,
+        options.write_requested,
+        options.force,
     ))
     .with_metadata(SetupMetadata::timed(duration_ms(started)));
 
@@ -261,11 +360,20 @@ fn action_models_listed_message(status: SetupStatus, count: usize) -> String {
     }
 }
 
-/// Default config plan path.
-fn default_user_config_path(home_dir: Option<&Path>) -> String {
-    home_dir
-        .map(|home| home.join(".cowork/config.toml").display().to_string())
-        .unwrap_or_default()
+/// Resolve config write target and path.
+fn config_target_path(
+    project_dir: &Path,
+    home_dir: Option<&Path>,
+    project_target: bool,
+) -> (&'static str, Option<PathBuf>) {
+    if project_target {
+        ("project", Some(project_dir.join("cowork.toml")))
+    } else {
+        (
+            "user",
+            home_dir.map(|home| home.join(".cowork/config.toml")),
+        )
+    }
 }
 
 /// Elapsed ms, saturated.
@@ -613,6 +721,156 @@ mod tests {
             before_project
         );
         assert_eq!(fs::read_to_string(&user_config).ok(), before_user);
+        assert_eq!(value["actions"][3]["name"], "config_write");
+        assert_eq!(value["actions"][3]["status"], "skipped");
+        assert_eq!(value["config"]["target"], "user");
+        assert_eq!(value["config"]["write_requested"], false);
+        assert_eq!(value["config"]["force"], false);
+    }
+
+    #[test]
+    fn write_config_defaults_to_user_target() {
+        let dirs = test_dirs("write-user");
+        let (host, handle) = spawn_server(ok_tags(&[]));
+        let args = setup_args_with_config(
+            Some(host.clone()),
+            Some("gemma3:12b"),
+            false,
+            true,
+            false,
+            false,
+        );
+
+        let output = run_setup_json_in(args, &dirs.project, Some(&dirs.home), &cpu_standard())
+            .expect("setup should return json");
+        handle.join().expect("server should join");
+        let value = parse_json(&output);
+        let path = dirs.home.join(".cowork/config.toml");
+        let written = fs::read_to_string(&path).expect("user config should read");
+
+        assert_eq!(value["status"], "ok");
+        assert_eq!(value["actions"][3]["name"], "config_write");
+        assert_eq!(value["actions"][3]["status"], "ok");
+        assert_eq!(value["actions"][3]["path"], path.display().to_string());
+        assert_eq!(value["config"]["target"], "user");
+        assert_eq!(value["config"]["write_requested"], true);
+        assert_eq!(
+            written,
+            format!("[ask]\nmodel = \"gemma3:12b\"\nhost = \"{host}\"\n")
+        );
+    }
+
+    #[test]
+    fn write_config_project_target_preserves_unrelated_toml() {
+        let dirs = test_dirs("write-project");
+        let (host, handle) = spawn_server(ok_tags(&[]));
+        let path = dirs.project.join("cowork.toml");
+        write_config(&path, "title = \"keep\"\n\n[other]\nenabled = true\n");
+        let args = setup_args_with_config(
+            Some(host.clone()),
+            Some("gemma3:12b"),
+            false,
+            true,
+            true,
+            false,
+        );
+
+        let output = run_setup_json_in(args, &dirs.project, Some(&dirs.home), &cpu_standard())
+            .expect("setup should return json");
+        handle.join().expect("server should join");
+        let value = parse_json(&output);
+        let written = fs::read_to_string(&path).expect("project config should read");
+
+        assert_eq!(value["actions"][3]["status"], "ok");
+        assert_eq!(value["config"]["target"], "project");
+        assert!(written.starts_with("title = \"keep\"\n\n[other]\nenabled = true\n\n"));
+        assert!(written.ends_with(&format!(
+            "[ask]\nmodel = \"gemma3:12b\"\nhost = \"{host}\"\n"
+        )));
+    }
+
+    #[test]
+    fn config_conflict_reports_error_without_mutation() {
+        let dirs = test_dirs("write-conflict");
+        let (host, handle) = spawn_server(ok_tags(&[]));
+        let path = dirs.project.join("cowork.toml");
+        let original = "[ask]\nmodel = \"old-model\"\nhost = \"http://old\"\n";
+        write_config(&path, original);
+        let args = setup_args_with_config(Some(host), Some("new-model"), false, true, true, false);
+
+        let output = run_setup_json_in(args, &dirs.project, Some(&dirs.home), &cpu_standard())
+            .expect("setup should return json");
+        handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["actions"][3]["status"], "error");
+        assert_eq!(
+            value["actions"][3]["message"],
+            "Could not write config: existing `[ask].model` differs; use `--force` to replace it."
+        );
+        assert_eq!(
+            fs::read_to_string(path).expect("config should read"),
+            original
+        );
+    }
+
+    #[test]
+    fn force_replaces_project_ask_values() {
+        let dirs = test_dirs("write-force");
+        let (host, handle) = spawn_server(ok_tags(&[]));
+        let path = dirs.project.join("cowork.toml");
+        write_config(
+            &path,
+            "title = \"keep\"\n\n[ask]\nmodel = \"old\"\nhost = \"http://old\"\n",
+        );
+        let args = setup_args_with_config(
+            Some(host.clone()),
+            Some("new-model"),
+            false,
+            true,
+            true,
+            true,
+        );
+
+        let output = run_setup_json_in(args, &dirs.project, Some(&dirs.home), &cpu_standard())
+            .expect("setup should return json");
+        handle.join().expect("server should join");
+        let value = parse_json(&output);
+        let written = fs::read_to_string(path).expect("config should read");
+
+        assert_eq!(value["status"], "ok");
+        assert_eq!(value["actions"][3]["status"], "ok");
+        assert_eq!(value["config"]["force"], true);
+        assert_eq!(
+            written,
+            format!("title = \"keep\"\n\n[ask]\nmodel = \"new-model\"\nhost = \"{host}\"\n")
+        );
+    }
+
+    #[test]
+    fn equal_project_ask_values_skip_rewrite() {
+        let dirs = test_dirs("write-equal");
+        let (host, handle) = spawn_server(ok_tags(&["gemma3:12b"]));
+        let path = dirs.project.join("cowork.toml");
+        let original = format!("[ask]\nmodel = \"gemma3:12b\"\nhost = \"{host}\"\n");
+        write_config(&path, &original);
+        let args = setup_args_with_config(None, None, false, true, true, false);
+
+        let output = run_setup_json_in(args, &dirs.project, Some(&dirs.home), &cpu_standard())
+            .expect("setup should return json");
+        handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert_eq!(value["actions"][3]["status"], "skipped");
+        assert_eq!(
+            value["actions"][3]["message"],
+            "Config already contains chosen model and host."
+        );
+        assert_eq!(
+            fs::read_to_string(path).expect("config should read"),
+            original
+        );
     }
 
     #[test]
@@ -646,10 +904,25 @@ mod tests {
     }
 
     fn setup_args_with(host: Option<String>, model: Option<&str>, pull: bool) -> SetupArgs {
+        setup_args_with_config(host, model, pull, false, false, false)
+    }
+
+    fn setup_args_with_config(
+        host: Option<String>,
+        model: Option<&str>,
+        pull: bool,
+        write_config: bool,
+        project: bool,
+        force: bool,
+    ) -> SetupArgs {
         SetupArgs {
             model: model.map(str::to_string),
             host,
             pull,
+            write_config,
+            user: false,
+            project,
+            force,
         }
     }
 

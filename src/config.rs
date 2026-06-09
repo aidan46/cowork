@@ -7,6 +7,11 @@ use serde::Deserialize;
 
 use crate::error::AppError;
 
+/// Ask config write operations.
+mod write;
+
+pub(crate) use write::{AskConfigWrite, write_ask_config};
+
 /// Default Ollama host for `ask`.
 pub const DEFAULT_HOST: &str = "http://localhost:11434";
 

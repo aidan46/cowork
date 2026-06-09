@@ -271,7 +271,6 @@ impl SetupAction {
 
     #[must_use]
     /// Set path.
-    #[cfg(test)]
     pub(crate) fn with_path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
         self
@@ -391,7 +390,7 @@ mod tests {
         )
         .with_actions(vec![
             SetupAction::new(
-                "config_write_skipped",
+                "config_write",
                 SetupStatus::Skipped,
                 "Dry run kept config unchanged.",
             )
@@ -428,7 +427,7 @@ mod tests {
         assert_eq!(
             value["actions"],
             json!([{
-                "name": "config_write_skipped",
+                "name": "config_write",
                 "status": "skipped",
                 "message": "Dry run kept config unchanged.",
                 "model": "gemma3:12b",

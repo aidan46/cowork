@@ -368,6 +368,10 @@ fn setup_parses_with_no_args() {
             assert_eq!(args.model, None);
             assert_eq!(args.host, None);
             assert!(!args.pull);
+            assert!(!args.write_config);
+            assert!(!args.user);
+            assert!(!args.project);
+            assert!(!args.force);
         }
         Command::Ask(_) => panic!("expected setup command"),
         Command::Brief(_) => panic!("expected setup command"),
@@ -387,6 +391,10 @@ fn setup_parses_model_and_pull() {
             assert_eq!(args.model.as_deref(), Some("gemma3:12b"));
             assert_eq!(args.host, None);
             assert!(args.pull);
+            assert!(!args.write_config);
+            assert!(!args.user);
+            assert!(!args.project);
+            assert!(!args.force);
         }
         _ => panic!("expected setup command"),
     }
@@ -399,6 +407,58 @@ fn setup_help_shows_flags() {
     assert!(help.contains("--model <MODEL>"));
     assert!(help.contains("--host <HOST>"));
     assert!(help.contains("--pull"));
+    assert!(help.contains("--write-config"));
+    assert!(help.contains("--user"));
+    assert!(help.contains("--project"));
+    assert!(help.contains("--force"));
+}
+
+#[test]
+fn setup_parses_config_write_flags() {
+    let cli = Cli::try_parse_from(["cowork", "setup", "--write-config", "--project", "--force"])
+        .expect("setup config flags should parse");
+
+    match cli.command {
+        Command::Setup(args) => {
+            assert!(args.write_config);
+            assert!(!args.user);
+            assert!(args.project);
+            assert!(args.force);
+        }
+        _ => panic!("expected setup command"),
+    }
+}
+
+#[test]
+fn setup_parses_explicit_user_target() {
+    let cli = Cli::try_parse_from(["cowork", "setup", "--write-config", "--user"])
+        .expect("explicit user target should parse");
+
+    match cli.command {
+        Command::Setup(args) => {
+            assert!(args.write_config);
+            assert!(args.user);
+            assert!(!args.project);
+            assert!(!args.force);
+        }
+        _ => panic!("expected setup command"),
+    }
+}
+
+#[test]
+fn setup_user_and_project_conflict() {
+    let result = Cli::try_parse_from(["cowork", "setup", "--write-config", "--user", "--project"]);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn setup_config_target_and_force_require_write_config() {
+    for flag in ["--user", "--project", "--force"] {
+        let result = Cli::try_parse_from(["cowork", "setup", flag]);
+
+        assert!(result.is_err(), "{flag} should require --write-config");
+    }
 }
 
 #[test]
