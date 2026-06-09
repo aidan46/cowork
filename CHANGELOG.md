@@ -4,6 +4,8 @@ All notable changes to `cowork` land here.
 
 ## Unreleased
 
+## v0.5.0, 2026-06-09
+
 ### Added
 
 - `cowork setup` recommends local model, optionally pulls it, writes ask config
