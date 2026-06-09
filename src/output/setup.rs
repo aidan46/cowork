@@ -396,6 +396,8 @@ mod tests {
             )
             .with_model("gemma3:12b")
             .with_path("/tmp/cowork.toml"),
+            SetupAction::new("model_probe", SetupStatus::Ok, "Chosen model probe passed.")
+                .with_model("gemma3:12b"),
         ])
         .with_config(SetupConfig::new("user", "/tmp/cowork.toml", false, false))
         .with_metadata(SetupMetadata::timed(12))
@@ -426,13 +428,21 @@ mod tests {
         );
         assert_eq!(
             value["actions"],
-            json!([{
-                "name": "config_write",
-                "status": "skipped",
-                "message": "Dry run kept config unchanged.",
-                "model": "gemma3:12b",
-                "path": "/tmp/cowork.toml"
-            }])
+            json!([
+                {
+                    "name": "config_write",
+                    "status": "skipped",
+                    "message": "Dry run kept config unchanged.",
+                    "model": "gemma3:12b",
+                    "path": "/tmp/cowork.toml"
+                },
+                {
+                    "name": "model_probe",
+                    "status": "ok",
+                    "message": "Chosen model probe passed.",
+                    "model": "gemma3:12b"
+                }
+            ])
         );
         assert_eq!(
             value["config"],

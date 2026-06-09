@@ -9,7 +9,7 @@ use crate::{
     SetupArgs,
     config::{AskConfigWrite, ResolvedAskConfig, resolve_ask_config, write_ask_config},
     error::AppError,
-    model::{self, OllamaErrorKind},
+    model::{self, DoctorProbeErrorKind, OllamaErrorKind},
     output::{
         SetupAction, SetupCheck, SetupConfig, SetupMetadata, SetupOutput, SetupRecommendation,
         SetupStatus,
@@ -278,7 +278,10 @@ fn render_setup_json(
         )
     };
 
-    let output = if pull_failed || config_failed {
+    let (probe_status, probe_message, probe_failed) =
+        probe_chosen_model(&config.host, chosen_model, needs_pull, pull_failed);
+
+    let output = if pull_failed || config_failed || probe_failed {
         SetupOutput::error(checks)
     } else {
         match status {
@@ -301,6 +304,7 @@ fn render_setup_json(
         SetupAction::new("config_write", config_status, config_message)
             .with_model(chosen_model)
             .with_path(&config_path_text),
+        SetupAction::new("model_probe", probe_status, probe_message).with_model(chosen_model),
     ])
     .with_config(SetupConfig::new(
         config_target,
@@ -311,6 +315,68 @@ fn render_setup_json(
     .with_metadata(SetupMetadata::timed(duration_ms(started)));
 
     output.to_json()
+}
+
+/// Probe available chosen model.
+fn probe_chosen_model(
+    host: &str,
+    chosen_model: &str,
+    needs_pull: bool,
+    pull_failed: bool,
+) -> (SetupStatus, String, bool) {
+    if pull_failed {
+        return (
+            SetupStatus::Skipped,
+            "Probe skipped; model pull failed.".to_string(),
+            false,
+        );
+    }
+
+    if needs_pull {
+        return (
+            SetupStatus::Skipped,
+            "Probe skipped; chosen model remains missing.".to_string(),
+            false,
+        );
+    }
+
+    let raw_probe = match model::request_doctor_probe(host, chosen_model) {
+        Ok(raw_probe) => raw_probe,
+        Err(error) => {
+            return (
+                SetupStatus::Error,
+                format!(
+                    "Could not probe chosen model `{chosen_model}`: {}.",
+                    probe_request_error_tag(error.kind)
+                ),
+                true,
+            );
+        }
+    };
+
+    if crate::output::parse_doctor_probe(&raw_probe).is_err() {
+        return (
+            SetupStatus::Error,
+            format!("Could not probe chosen model `{chosen_model}`: invalid_output_shape."),
+            true,
+        );
+    }
+
+    (
+        SetupStatus::Ok,
+        "Chosen model probe passed.".to_string(),
+        false,
+    )
+}
+
+/// Stable probe request error tag.
+const fn probe_request_error_tag(kind: DoctorProbeErrorKind) -> &'static str {
+    match kind {
+        DoctorProbeErrorKind::BadHost => "bad_host",
+        DoctorProbeErrorKind::UnreachableHost => "unreachable_host",
+        DoctorProbeErrorKind::ProbeRequestFailed => "request_failed",
+        DoctorProbeErrorKind::InvalidProbeJson => "invalid_response_envelope",
+    }
 }
 
 /// Format loaded config summary.
@@ -403,16 +469,18 @@ mod tests {
     #[test]
     fn cli_host_override_reaches_tags() {
         let dirs = test_dirs("cli-host");
-        let (host, handle) = spawn_server(ok_tags(&["qwen2.5-coder:7b"]));
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["qwen2.5-coder:7b"]),
+            ok_probe_response(r#"{"ok":true}"#),
+        ]);
         let args = setup_args(Some(host));
 
         let output = run_setup_json_in(args, &dirs.project, Some(&dirs.home), &cpu_standard())
             .expect("setup should pass");
-        let request = handle.join().expect("server should join");
-        let request_text = String::from_utf8(request).expect("request should be utf-8");
+        let requests = handle.join().expect("server should join");
         let value = parse_json(&output);
 
-        assert!(request_text.starts_with("GET /api/tags HTTP/1.1\r\n"));
+        assert!(requests[0].starts_with(b"GET /api/tags HTTP/1.1\r\n"));
         assert_eq!(value["status"], "ok");
     }
 
@@ -469,7 +537,10 @@ mod tests {
     #[test]
     fn acceptable_installed_model_wins_without_pull() {
         let dirs = test_dirs("installed-wins");
-        let (host, handle) = spawn_server(ok_tags(&["qwen2.5-coder:3b", "qwen2.5-coder:7b"]));
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["qwen2.5-coder:3b", "qwen2.5-coder:7b"]),
+            ok_probe_response(r#"{"ok":true}"#),
+        ]);
 
         let output = run_setup_json_in(
             setup_args(Some(host)),
@@ -540,6 +611,12 @@ mod tests {
         assert_eq!(value["recommendation"]["reason"], "Selected by `--model`.");
         assert_eq!(value["actions"][2]["name"], "model_pull");
         assert_eq!(value["actions"][2]["status"], "skipped");
+        assert_eq!(value["actions"][4]["name"], "model_probe");
+        assert_eq!(value["actions"][4]["status"], "skipped");
+        assert_eq!(
+            value["actions"][4]["message"],
+            "Probe skipped; chosen model remains missing."
+        );
     }
 
     #[test]
@@ -548,6 +625,41 @@ mod tests {
         let (host, handle) = spawn_server_sequence(vec![
             ok_tags(&["gemma3:12b-latest"]),
             ok_response(r#"{"status":"success"}"#),
+            ok_probe_response(r#"{"ok":true}"#),
+        ]);
+
+        let output = run_setup_json_in(
+            setup_args_with(Some(host), Some("gemma3:12b"), true),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should pass");
+        let requests = handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert_eq!(requests.len(), 3);
+        assert!(requests[0].starts_with(b"GET /api/tags HTTP/1.1\r\n"));
+        assert!(requests[1].starts_with(b"POST /api/pull HTTP/1.1\r\n"));
+        assert!(requests[2].starts_with(b"POST /api/generate HTTP/1.1\r\n"));
+        assert_eq!(
+            serde_json::from_slice::<Value>(request_body(&requests[1]))
+                .expect("pull body should be json"),
+            json!({ "model": "gemma3:12b", "stream": false })
+        );
+        assert_eq!(value["recommendation"]["needs_pull"], false);
+        assert_eq!(value["actions"][2]["name"], "model_pull");
+        assert_eq!(value["actions"][2]["status"], "ok");
+        assert_eq!(value["actions"][4]["name"], "model_probe");
+        assert_eq!(value["actions"][4]["status"], "ok");
+    }
+
+    #[test]
+    fn installed_chosen_model_with_pull_skips_pull_request() {
+        let dirs = test_dirs("pull-installed");
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["gemma3:12b"]),
+            ok_probe_response(r#"{"ok":true}"#),
         ]);
 
         let output = run_setup_json_in(
@@ -562,39 +674,25 @@ mod tests {
 
         assert_eq!(requests.len(), 2);
         assert!(requests[0].starts_with(b"GET /api/tags HTTP/1.1\r\n"));
-        assert!(requests[1].starts_with(b"POST /api/pull HTTP/1.1\r\n"));
+        assert!(requests[1].starts_with(b"POST /api/generate HTTP/1.1\r\n"));
         assert_eq!(
             serde_json::from_slice::<Value>(request_body(&requests[1]))
-                .expect("pull body should be json"),
-            json!({ "model": "gemma3:12b", "stream": false })
+                .expect("probe body should be json"),
+            json!({
+                "model": "gemma3:12b",
+                "prompt": "Return strict JSON only with exact shape {\"ok\":true}.",
+                "stream": false,
+                "format": "json",
+                "options": { "temperature": 0 }
+            })
         );
-        assert_eq!(value["recommendation"]["needs_pull"], false);
-        assert_eq!(value["actions"][2]["name"], "model_pull");
-        assert_eq!(value["actions"][2]["status"], "ok");
-    }
-
-    #[test]
-    fn installed_chosen_model_with_pull_skips_pull_request() {
-        let dirs = test_dirs("pull-installed");
-        let (host, handle) = spawn_server(ok_tags(&["gemma3:12b"]));
-
-        let output = run_setup_json_in(
-            setup_args_with(Some(host), Some("gemma3:12b"), true),
-            &dirs.project,
-            Some(&dirs.home),
-            &cpu_standard(),
-        )
-        .expect("setup should pass");
-        let request = handle.join().expect("server should join");
-        let value = parse_json(&output);
-
-        assert!(request.starts_with(b"GET /api/tags HTTP/1.1\r\n"));
         assert_eq!(value["recommendation"]["needs_pull"], false);
         assert_eq!(value["actions"][2]["status"], "skipped");
         assert_eq!(
             value["actions"][2]["message"],
             "Chosen model is already installed."
         );
+        assert_eq!(value["actions"][4]["status"], "ok");
     }
 
     #[test]
@@ -621,6 +719,90 @@ mod tests {
         assert_eq!(
             value["actions"][2]["message"],
             "Could not pull chosen model `gemma3:12b`: request_failed."
+        );
+        assert_eq!(value["actions"][4]["name"], "model_probe");
+        assert_eq!(value["actions"][4]["status"], "skipped");
+        assert_eq!(
+            value["actions"][4]["message"],
+            "Probe skipped; model pull failed."
+        );
+    }
+
+    #[test]
+    fn probe_request_failure_returns_stable_error() {
+        let dirs = test_dirs("probe-request-failure");
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["gemma3:12b"]),
+            error_response(500, "variable transport detail"),
+        ]);
+
+        let output = run_setup_json_in(
+            setup_args_with(Some(host), Some("gemma3:12b"), false),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should return json");
+        let requests = handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["actions"][4]["name"], "model_probe");
+        assert_eq!(value["actions"][4]["status"], "error");
+        assert_eq!(
+            value["actions"][4]["message"],
+            "Could not probe chosen model `gemma3:12b`: request_failed."
+        );
+    }
+
+    #[test]
+    fn invalid_probe_envelope_returns_stable_error() {
+        let dirs = test_dirs("probe-envelope-failure");
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["gemma3:12b"]),
+            ok_response(r#"{"done":true}"#),
+        ]);
+
+        let output = run_setup_json_in(
+            setup_args_with(Some(host), Some("gemma3:12b"), false),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should return json");
+        handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert_eq!(value["status"], "error");
+        assert_eq!(
+            value["actions"][4]["message"],
+            "Could not probe chosen model `gemma3:12b`: invalid_response_envelope."
+        );
+    }
+
+    #[test]
+    fn invalid_probe_output_shape_returns_stable_error() {
+        let dirs = test_dirs("probe-shape-failure");
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["gemma3:12b"]),
+            ok_probe_response(r#"{"ready":true}"#),
+        ]);
+
+        let output = run_setup_json_in(
+            setup_args_with(Some(host), Some("gemma3:12b"), false),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should return json");
+        handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert_eq!(value["status"], "error");
+        assert_eq!(
+            value["actions"][4]["message"],
+            "Could not probe chosen model `gemma3:12b`: invalid_output_shape."
         );
     }
 
@@ -792,7 +974,10 @@ mod tests {
     #[test]
     fn config_conflict_reports_error_without_mutation() {
         let dirs = test_dirs("write-conflict");
-        let (host, handle) = spawn_server(ok_tags(&[]));
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["new-model"]),
+            ok_probe_response(r#"{"ok":true}"#),
+        ]);
         let path = dirs.project.join("cowork.toml");
         let original = "[ask]\nmodel = \"old-model\"\nhost = \"http://old\"\n";
         write_config(&path, original);
@@ -800,9 +985,10 @@ mod tests {
 
         let output = run_setup_json_in(args, &dirs.project, Some(&dirs.home), &cpu_standard())
             .expect("setup should return json");
-        handle.join().expect("server should join");
+        let requests = handle.join().expect("server should join");
         let value = parse_json(&output);
 
+        assert_eq!(requests.len(), 2);
         assert_eq!(value["status"], "error");
         assert_eq!(value["actions"][3]["status"], "error");
         assert_eq!(
@@ -813,6 +999,8 @@ mod tests {
             fs::read_to_string(path).expect("config should read"),
             original
         );
+        assert_eq!(value["actions"][4]["name"], "model_probe");
+        assert_eq!(value["actions"][4]["status"], "ok");
     }
 
     #[test]
@@ -851,7 +1039,10 @@ mod tests {
     #[test]
     fn equal_project_ask_values_skip_rewrite() {
         let dirs = test_dirs("write-equal");
-        let (host, handle) = spawn_server(ok_tags(&["gemma3:12b"]));
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["gemma3:12b"]),
+            ok_probe_response(r#"{"ok":true}"#),
+        ]);
         let path = dirs.project.join("cowork.toml");
         let original = format!("[ask]\nmodel = \"gemma3:12b\"\nhost = \"{host}\"\n");
         write_config(&path, &original);
@@ -1078,6 +1269,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         ok_response(&json!({ "models": models }).to_string())
+    }
+
+    fn ok_probe_response(model_output: &str) -> String {
+        ok_response(&json!({ "response": model_output }).to_string())
     }
 
     fn ok_response(body: &str) -> String {
