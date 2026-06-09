@@ -181,9 +181,17 @@ pub struct DoctorArgs {
 /// Args for `cowork setup`.
 #[derive(Debug, Args)]
 pub struct SetupArgs {
+    /// Model override.
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+
     /// Host override.
     #[arg(long, value_name = "HOST")]
     pub host: Option<String>,
+
+    /// Pull chosen model when missing.
+    #[arg(long)]
+    pub pull: bool,
 }
 
 /// Args for `cowork init`.

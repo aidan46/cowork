@@ -34,11 +34,12 @@ fn run_setup_json(args: SetupArgs) -> Result<String, AppError> {
         AppError::invalid_arguments(format!("failed to resolve current dir: {error}"))
     })?;
     let home_dir = env::var_os("HOME").map(std::path::PathBuf::from);
-    let SetupArgs { host } = args;
-    let config = resolve_ask_config(&project_dir, home_dir.as_deref(), None, host)?;
+    let SetupArgs { model, host, pull } = args;
+    let cli_model = model.is_some();
+    let config = resolve_ask_config(&project_dir, home_dir.as_deref(), model, host)?;
     let facts = recommend::collect_hardware_facts();
 
-    render_setup_json(config, home_dir.as_deref(), &facts)
+    render_setup_json(config, home_dir.as_deref(), &facts, cli_model, pull)
 }
 
 /// Run setup with explicit dirs and facts.
@@ -53,10 +54,11 @@ pub(crate) fn run_setup_json_in(
     home_dir: Option<&Path>,
     facts: &HardwareFacts,
 ) -> Result<String, AppError> {
-    let SetupArgs { host } = args;
-    let config = resolve_ask_config(project_dir, home_dir, None, host)?;
+    let SetupArgs { model, host, pull } = args;
+    let cli_model = model.is_some();
+    let config = resolve_ask_config(project_dir, home_dir, model, host)?;
 
-    render_setup_json(config, home_dir, facts)
+    render_setup_json(config, home_dir, facts, cli_model, pull)
 }
 
 /// Render setup from resolved config.
@@ -68,6 +70,8 @@ fn render_setup_json(
     config: ResolvedAskConfig,
     home_dir: Option<&Path>,
     facts: &HardwareFacts,
+    cli_model: bool,
+    pull_requested: bool,
 ) -> Result<String, AppError> {
     let started = Instant::now();
     let mut checks = vec![
@@ -110,39 +114,94 @@ fn render_setup_json(
     };
 
     let recommendation = recommend::recommend_model(facts, &installed_models);
-    let output = match status {
-        SetupStatus::Ok => SetupOutput::ok(checks),
-        SetupStatus::Warning | SetupStatus::Error | SetupStatus::Skipped => {
-            SetupOutput::warning(checks)
+    let (chosen_model, reason, confidence, hardware_class, selection_message, mut needs_pull) =
+        match config.model.as_deref() {
+            Some(model) if cli_model => (
+                model,
+                "Selected by `--model`.",
+                None,
+                None,
+                format!("Selected model `{model}` from `--model`."),
+                !installed_models.iter().any(|installed| installed == model),
+            ),
+            Some(model) => (
+                model,
+                "Selected from resolved config.",
+                None,
+                None,
+                format!("Selected configured model `{model}`."),
+                !installed_models.iter().any(|installed| installed == model),
+            ),
+            None => (
+                recommendation.model(),
+                recommendation.why(),
+                Some(recommendation.confidence_tag()),
+                Some(recommendation.hardware_class_tag()),
+                format!("Recommended model `{}`.", recommendation.model()),
+                recommendation.needs_pull(),
+            ),
+        };
+    let (pull_status, pull_message, pull_failed) = if !needs_pull {
+        (
+            SetupStatus::Skipped,
+            "Chosen model is already installed.".to_string(),
+            false,
+        )
+    } else if !pull_requested {
+        (
+            SetupStatus::Skipped,
+            "Pull not requested; chosen model remains missing.".to_string(),
+            false,
+        )
+    } else {
+        match model::request_ollama_pull(&config.host, chosen_model) {
+            Ok(()) => {
+                needs_pull = false;
+                (
+                    SetupStatus::Ok,
+                    format!("Pulled chosen model `{chosen_model}`."),
+                    false,
+                )
+            }
+            Err(error) => (
+                SetupStatus::Error,
+                format!(
+                    "Could not pull chosen model `{chosen_model}`: {}.",
+                    ollama_error_tag(error.kind)
+                ),
+                true,
+            ),
+        }
+    };
+
+    let mut recommendation_row = SetupRecommendation::new(chosen_model, needs_pull, reason);
+    if let Some(confidence) = confidence {
+        recommendation_row = recommendation_row.with_confidence(confidence);
+    }
+    if let Some(hardware_class) = hardware_class {
+        recommendation_row = recommendation_row.with_hardware_class(hardware_class);
+    }
+
+    let output = if pull_failed {
+        SetupOutput::error(checks)
+    } else {
+        match status {
+            SetupStatus::Ok => SetupOutput::ok(checks),
+            SetupStatus::Warning | SetupStatus::Error | SetupStatus::Skipped => {
+                SetupOutput::warning(checks)
+            }
         }
     }
-    .with_recommendation(
-        SetupRecommendation::new(
-            recommendation.model(),
-            recommendation.needs_pull(),
-            recommendation.why(),
-        )
-        .with_confidence(recommendation.confidence_tag())
-        .with_hardware_class(recommendation.hardware_class_tag()),
-    )
+    .with_recommendation(recommendation_row)
     .with_actions(vec![
         SetupAction::new(
             "models_listed",
             status,
             action_models_listed_message(status, installed_models.len()),
         ),
-        SetupAction::new(
-            "model_recommended",
-            SetupStatus::Ok,
-            format!("Recommended model `{}`.", recommendation.model()),
-        )
-        .with_model(recommendation.model()),
-        SetupAction::new(
-            "model_pull_skipped",
-            SetupStatus::Skipped,
-            "Dry run kept models unchanged.",
-        )
-        .with_model(recommendation.model()),
+        SetupAction::new("model_selected", SetupStatus::Ok, selection_message)
+            .with_model(chosen_model),
+        SetupAction::new("model_pull", pull_status, pull_message).with_model(chosen_model),
     ])
     .with_config(SetupConfig::new(
         "user",
@@ -174,11 +233,21 @@ fn format_loaded_config_message(loaded_files: &[std::path::PathBuf]) -> String {
 
 /// Map Ollama error to action status and stable tag.
 const fn listing_failure(kind: OllamaErrorKind) -> (SetupStatus, &'static str) {
+    let status = match kind {
+        OllamaErrorKind::BadHost | OllamaErrorKind::UnreachableHost => SetupStatus::Warning,
+        OllamaErrorKind::RequestFailed | OllamaErrorKind::InvalidJson => SetupStatus::Error,
+    };
+
+    (status, ollama_error_tag(kind))
+}
+
+/// Stable Ollama error tag.
+const fn ollama_error_tag(kind: OllamaErrorKind) -> &'static str {
     match kind {
-        OllamaErrorKind::BadHost => (SetupStatus::Warning, "bad_host"),
-        OllamaErrorKind::UnreachableHost => (SetupStatus::Warning, "unreachable_host"),
-        OllamaErrorKind::RequestFailed => (SetupStatus::Error, "request_failed"),
-        OllamaErrorKind::InvalidJson => (SetupStatus::Error, "invalid_json"),
+        OllamaErrorKind::BadHost => "bad_host",
+        OllamaErrorKind::UnreachableHost => "unreachable_host",
+        OllamaErrorKind::RequestFailed => "request_failed",
+        OllamaErrorKind::InvalidJson => "invalid_json",
     }
 }
 
@@ -309,6 +378,145 @@ mod tests {
     }
 
     #[test]
+    fn configured_model_wins_over_recommendation() {
+        let dirs = test_dirs("config-model");
+        let (host, handle) = spawn_server(ok_tags(&["qwen2.5-coder:7b"]));
+        write_config(
+            &dirs.project.join("cowork.toml"),
+            "[ask]\nmodel = \"gemma3:12b\"\n",
+        );
+
+        let output = run_setup_json_in(
+            setup_args(Some(host)),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should pass");
+        let value = parse_json(&output);
+
+        handle.join().expect("server should join");
+        assert_eq!(value["recommendation"]["model"], "gemma3:12b");
+        assert_eq!(value["recommendation"]["needs_pull"], true);
+        assert_eq!(
+            value["recommendation"]["reason"],
+            "Selected from resolved config."
+        );
+        assert_eq!(value["actions"][1]["name"], "model_selected");
+        assert_eq!(value["actions"][1]["model"], "gemma3:12b");
+    }
+
+    #[test]
+    fn cli_model_wins_over_configured_model_without_pull() {
+        let dirs = test_dirs("cli-model");
+        let (host, handle) = spawn_server(ok_tags(&[]));
+        write_config(
+            &dirs.project.join("cowork.toml"),
+            "[ask]\nmodel = \"qwen2.5-coder:3b\"\n",
+        );
+
+        let output = run_setup_json_in(
+            setup_args_with(Some(host), Some("gemma3:12b"), false),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should pass");
+        let request = handle.join().expect("server should join");
+        let request_text = String::from_utf8(request).expect("request should be utf-8");
+        let value = parse_json(&output);
+
+        assert!(request_text.starts_with("GET /api/tags HTTP/1.1\r\n"));
+        assert_eq!(value["recommendation"]["model"], "gemma3:12b");
+        assert_eq!(value["recommendation"]["needs_pull"], true);
+        assert_eq!(value["recommendation"]["reason"], "Selected by `--model`.");
+        assert_eq!(value["actions"][2]["name"], "model_pull");
+        assert_eq!(value["actions"][2]["status"], "skipped");
+    }
+
+    #[test]
+    fn missing_chosen_model_with_pull_sends_one_exact_pull_request() {
+        let dirs = test_dirs("pull-missing");
+        let (host, handle) = spawn_server_sequence(vec![
+            ok_tags(&["gemma3:12b-latest"]),
+            ok_response(r#"{"status":"success"}"#),
+        ]);
+
+        let output = run_setup_json_in(
+            setup_args_with(Some(host), Some("gemma3:12b"), true),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should pass");
+        let requests = handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with(b"GET /api/tags HTTP/1.1\r\n"));
+        assert!(requests[1].starts_with(b"POST /api/pull HTTP/1.1\r\n"));
+        assert_eq!(
+            serde_json::from_slice::<Value>(request_body(&requests[1]))
+                .expect("pull body should be json"),
+            json!({ "model": "gemma3:12b", "stream": false })
+        );
+        assert_eq!(value["recommendation"]["needs_pull"], false);
+        assert_eq!(value["actions"][2]["name"], "model_pull");
+        assert_eq!(value["actions"][2]["status"], "ok");
+    }
+
+    #[test]
+    fn installed_chosen_model_with_pull_skips_pull_request() {
+        let dirs = test_dirs("pull-installed");
+        let (host, handle) = spawn_server(ok_tags(&["gemma3:12b"]));
+
+        let output = run_setup_json_in(
+            setup_args_with(Some(host), Some("gemma3:12b"), true),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should pass");
+        let request = handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert!(request.starts_with(b"GET /api/tags HTTP/1.1\r\n"));
+        assert_eq!(value["recommendation"]["needs_pull"], false);
+        assert_eq!(value["actions"][2]["status"], "skipped");
+        assert_eq!(
+            value["actions"][2]["message"],
+            "Chosen model is already installed."
+        );
+    }
+
+    #[test]
+    fn pull_failure_returns_deterministic_setup_json() {
+        let dirs = test_dirs("pull-failure");
+        let (host, handle) = spawn_server_sequence(vec![ok_tags(&[]), error_response(500, "boom")]);
+
+        let output = run_setup_json_in(
+            setup_args_with(Some(host), Some("gemma3:12b"), true),
+            &dirs.project,
+            Some(&dirs.home),
+            &cpu_standard(),
+        )
+        .expect("setup should return json");
+        let requests = handle.join().expect("server should join");
+        let value = parse_json(&output);
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["recommendation"]["model"], "gemma3:12b");
+        assert_eq!(value["recommendation"]["needs_pull"], true);
+        assert_eq!(value["actions"][2]["name"], "model_pull");
+        assert_eq!(value["actions"][2]["status"], "error");
+        assert_eq!(
+            value["actions"][2]["message"],
+            "Could not pull chosen model `gemma3:12b`: request_failed."
+        );
+    }
+
+    #[test]
     fn tags_failure_returns_warning_and_fallback_recommendation() {
         let dirs = test_dirs("tags-failure");
         let (host, handle) = spawn_server(error_response(500, "boom"));
@@ -333,7 +541,7 @@ mod tests {
         assert_eq!(value["recommendation"]["model"], "qwen2.5-coder:7b");
         assert_eq!(value["recommendation"]["needs_pull"], true);
         assert_eq!(value["actions"][0]["status"], "error");
-        assert_eq!(value["actions"][2]["name"], "model_pull_skipped");
+        assert_eq!(value["actions"][2]["name"], "model_pull");
         assert_eq!(value["actions"][2]["status"], "skipped");
     }
 
@@ -434,7 +642,15 @@ mod tests {
     }
 
     fn setup_args(host: Option<String>) -> SetupArgs {
-        SetupArgs { host }
+        setup_args_with(host, None, false)
+    }
+
+    fn setup_args_with(host: Option<String>, model: Option<&str>, pull: bool) -> SetupArgs {
+        SetupArgs {
+            model: model.map(str::to_string),
+            host,
+            pull,
+        }
     }
 
     fn parse_json(output: &str) -> Value {
@@ -491,6 +707,30 @@ mod tests {
         (format!("http://{address}"), handle)
     }
 
+    fn spawn_server_sequence(responses: Vec<String>) -> (String, thread::JoinHandle<Vec<Vec<u8>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let address = listener.local_addr().expect("listener should have addr");
+
+        let handle = thread::spawn(move || {
+            responses
+                .into_iter()
+                .map(|response| {
+                    let (mut stream, _) = listener.accept().expect("server should accept");
+                    let request = read_request(&mut stream);
+
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("response should write");
+                    stream.flush().expect("response should flush");
+
+                    request
+                })
+                .collect()
+        });
+
+        (format!("http://{address}"), handle)
+    }
+
     fn unused_host() -> String {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
         let address = listener.local_addr().expect("listener should have addr");
@@ -506,6 +746,8 @@ mod tests {
 
         let mut request = Vec::new();
         let mut buffer = [0_u8; 1024];
+        let mut body_start = None;
+        let mut body_len = 0_usize;
 
         loop {
             let read = stream.read(&mut buffer).expect("request should read");
@@ -515,12 +757,45 @@ mod tests {
 
             request.extend_from_slice(&buffer[..read]);
 
-            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            if body_start.is_none()
+                && let Some(index) = find_bytes(&request, b"\r\n\r\n")
+            {
+                body_start = Some(index + 4);
+                body_len = parse_content_length(&request[..index + 4]);
+            }
+
+            if let Some(body_start) = body_start
+                && request.len() >= body_start + body_len
+            {
                 break;
             }
         }
 
         request
+    }
+
+    fn request_body(request: &[u8]) -> &[u8] {
+        let body_start = find_bytes(request, b"\r\n\r\n").expect("request should have body");
+
+        &request[body_start + 4..]
+    }
+
+    fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack
+            .windows(needle.len())
+            .position(|window| window == needle)
+    }
+
+    fn parse_content_length(headers: &[u8]) -> usize {
+        let headers = String::from_utf8(headers.to_vec()).expect("headers should be utf-8");
+
+        headers
+            .lines()
+            .find_map(|line| {
+                let value = line.strip_prefix("content-length: ")?;
+                value.parse::<usize>().ok()
+            })
+            .unwrap_or(0)
     }
 
     fn ok_tags(models: &[&str]) -> String {
