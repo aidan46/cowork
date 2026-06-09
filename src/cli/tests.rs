@@ -365,7 +365,9 @@ fn setup_parses_with_no_args() {
 
     match cli.command {
         Command::Setup(args) => {
+            assert_eq!(args.model, None);
             assert_eq!(args.host, None);
+            assert!(!args.pull);
         }
         Command::Ask(_) => panic!("expected setup command"),
         Command::Brief(_) => panic!("expected setup command"),
@@ -376,10 +378,27 @@ fn setup_parses_with_no_args() {
 }
 
 #[test]
-fn setup_help_shows_host_flag() {
+fn setup_parses_model_and_pull() {
+    let cli = Cli::try_parse_from(["cowork", "setup", "--model", "gemma3:12b", "--pull"])
+        .expect("setup args should parse");
+
+    match cli.command {
+        Command::Setup(args) => {
+            assert_eq!(args.model.as_deref(), Some("gemma3:12b"));
+            assert_eq!(args.host, None);
+            assert!(args.pull);
+        }
+        _ => panic!("expected setup command"),
+    }
+}
+
+#[test]
+fn setup_help_shows_flags() {
     let help = command_help("setup");
 
+    assert!(help.contains("--model <MODEL>"));
     assert!(help.contains("--host <HOST>"));
+    assert!(help.contains("--pull"));
 }
 
 #[test]

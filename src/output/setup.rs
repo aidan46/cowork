@@ -40,7 +40,6 @@ impl SetupOutput {
 
     #[must_use]
     /// Build error output.
-    #[cfg(test)]
     pub(crate) fn error(checks: Vec<SetupCheck>) -> Self {
         Self::new(SetupStatus::Error, checks)
     }
