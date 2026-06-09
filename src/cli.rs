@@ -192,6 +192,22 @@ pub struct SetupArgs {
     /// Pull chosen model when missing.
     #[arg(long)]
     pub pull: bool,
+
+    /// Write chosen model and host to config.
+    #[arg(long)]
+    pub write_config: bool,
+
+    /// Write user config.
+    #[arg(long, requires = "write_config", conflicts_with = "project")]
+    pub user: bool,
+
+    /// Write project config.
+    #[arg(long, requires = "write_config", conflicts_with = "user")]
+    pub project: bool,
+
+    /// Replace different ask config values.
+    #[arg(long, requires = "write_config")]
+    pub force: bool,
 }
 
 /// Args for `cowork init`.
