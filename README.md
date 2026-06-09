@@ -25,44 +25,51 @@ When agent or script needs one repo-grounded answer, whole-repo scans and raw fi
 
 Current release path is source checkout only. No crates.io package or prebuilt binaries yet.
 
-Examples below assume `cowork` binary already exists from local source build.
-
-Need:
+Prerequisites:
 
 - Rust toolchain
-- local model endpoint that supports `POST /api/generate`
-- one or more `--paths`
-- one `--question`
-- `--model`, unless config already sets it
+- Ollama running locally
+- macOS: install from [official app page](https://ollama.com/download/mac), then ensure
+  `ollama` CLI is available in `PATH`
+- Linux: follow [official install page](https://ollama.com/download/linux)
+- Windows: unsupported and untested in v0.5.0
 
-Verify setup:
-
-```bash
-cowork doctor --model your-model
-```
-
-Print agent rules:
+Install from source checkout:
 
 ```bash
-cowork init codex --print
-cowork init claude --print
+git clone https://github.com/aidan46/cowork.git
+cd cowork
+cargo install --path .
 ```
 
-Write managed agent blocks:
+Choose recommended model, pull it when missing, write user config, then probe it:
 
 ```bash
-cowork init codex --write
-cowork init claude --write
+cowork setup --write-config --pull
 ```
 
-If `doctor` passes, ask next:
+Ask without `--model` because setup wrote `[ask]` config:
 
 ```bash
 cowork ask \
   --paths src/cli.rs src/config.rs \
-  --question "How does ask config precedence work?" \
-  --model your-model
+  --question "How does ask config precedence work?"
 ```
+
+Setup stays explicit and safe:
+
+- bare `cowork setup` does not pull models or write config
+- `--pull` permits pulling chosen model when exact Ollama name is missing
+- `--write-config` permits config mutation and defaults to user config
+- with `--write-config`, `--user` selects `$HOME/.cowork/config.toml`
+- with `--write-config`, `--project` selects `./cowork.toml`
+- with `--write-config`, `--force` permits replacing different existing `[ask]`
+  model or host values
+- setup probes only installed or successfully pulled chosen model
+- setup never installs Ollama
+- stdout remains deterministic JSON
+
+Run `cowork doctor` for separate read-only diagnostics when setup reports problem.
 
 Or locate first, then decide what to read:
 
@@ -214,7 +221,8 @@ Notes:
 
 ## Scope today
 
-- five subcommands: `doctor`, `ask`, `locate`, `brief`, `init`
+- six subcommands: `setup`, `doctor`, `ask`, `locate`, `brief`, `init`
+- `setup` recommends local model and mutates only with explicit flags
 - `init --print` prints short agent rules
 - `init --write` writes bounded managed blocks to `AGENTS.md` or `CLAUDE.md`
 - JSON stdout only, even on errors
@@ -226,4 +234,4 @@ Notes:
 
 - read [SUPPORT.md](SUPPORT.md) for usage questions and bug reports
 - read [CONTRIBUTING.md](CONTRIBUTING.md) before opening PR
-- use `cowork doctor --help`, `cowork ask --help`, `cowork locate --help`, `cowork brief --help`, and `cowork init --help` for current flag surface
+- use `cowork setup --help`, `cowork doctor --help`, `cowork ask --help`, `cowork locate --help`, `cowork brief --help`, and `cowork init --help` for current flag surface

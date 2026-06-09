@@ -96,6 +96,41 @@ cowork ask \
 
 ---
 
+# Setup Command
+
+```bash
+cowork setup \
+  [--model <MODEL>] \
+  [--host <HOST>] \
+  [--pull] \
+  [--write-config] \
+  [--user | --project] \
+  [--force]
+```
+
+Contract:
+
+* model choice priority is CLI `--model`, resolved ask config, then recommendation
+* installed match requires exact Ollama model name
+* bare setup does not pull models or write config
+* `--pull` permits pull only when chosen model is missing
+* `--write-config` permits writing chosen model and host
+* write target defaults to `$HOME/.cowork/config.toml`
+* `--user` selects user config explicitly
+* `--project` selects `./cowork.toml`
+* `--user`, `--project`, and `--force` require `--write-config`
+* `--user` and `--project` conflict
+* different existing `[ask]` model or host values require `--force`
+* probe runs only for installed or successfully pulled chosen model
+* setup never installs Ollama
+* stdout is deterministic JSON
+
+Setup resolves ask config with existing precedence: CLI, project, user, built-in
+host default. Setup output includes command, status, checks, recommendation,
+actions, optional config plan, and metadata.
+
+---
+
 # Default Configuration
 
 ```txt

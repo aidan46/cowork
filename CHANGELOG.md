@@ -4,6 +4,16 @@ All notable changes to `cowork` land here.
 
 ## Unreleased
 
+### Added
+
+- `cowork setup` recommends local model, optionally pulls it, writes ask config
+  only when requested, and probes available chosen model
+
+### Changed
+
+- `cowork doctor` now reports installed Ollama model state, requires exact
+  effective-model match, and skips probe when model is missing
+
 ## v0.4.0, 2026-06-08
 
 ### Added
