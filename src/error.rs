@@ -3,7 +3,7 @@ use std::{io, path::Path, process::ExitCode};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::output::{cli_command, init_command};
+use crate::output::CommandId;
 
 #[derive(Debug, Error)]
 /// App error surface.
@@ -18,7 +18,7 @@ pub enum AppError {
     /// Subcommand tag wraps source error.
     CommandContext {
         /// Command tag.
-        command: &'static str,
+        command: CommandId,
         /// Wrapped source error.
         source: Box<Self>,
     },
@@ -105,7 +105,7 @@ impl AppError {
 
     #[must_use]
     /// Wrap error with subcommand tag.
-    pub fn with_command(self, command: &'static str) -> Self {
+    pub(crate) fn with_command(self, command: CommandId) -> Self {
         Self::CommandContext {
             command,
             source: Box::new(self),
@@ -206,7 +206,10 @@ impl AppError {
 
         let mut root = Map::with_capacity(4);
         root.insert(String::from("schema_version"), Value::from("1.0"));
-        root.insert(String::from("command"), Value::from(self.command()));
+        root.insert(
+            String::from("command"),
+            Value::from(self.command().as_str()),
+        );
         root.insert(String::from("status"), Value::from("error"));
         root.insert(String::from("error"), Value::Object(error));
 
@@ -232,18 +235,18 @@ impl AppError {
 
     #[must_use]
     /// Return command tag for error.
-    fn command(&self) -> &'static str {
+    fn command(&self) -> CommandId {
         match self {
-            Self::InvalidArguments { .. } => cli_command(),
-            Self::CommandContext { command, .. } => command,
-            Self::InitFileUpdate { .. } => init_command(),
+            Self::InvalidArguments { .. } => CommandId::Cli,
+            Self::CommandContext { command, .. } => *command,
+            Self::InitFileUpdate { .. } => CommandId::Init,
             Self::MissingPath { .. }
             | Self::DirectoryRequiresRecursive { .. }
             | Self::FileRead { .. }
             | Self::NoInputFiles
             | Self::MaxBytesExceeded { .. }
             | Self::ModelRequestFailed { .. }
-            | Self::ResponseParseFailed { .. } => "ask",
+            | Self::ResponseParseFailed { .. } => CommandId::Ask,
         }
     }
 
@@ -295,6 +298,7 @@ mod tests {
     use serde_json::json;
 
     use super::{AppError, DoctorExit};
+    use crate::output::CommandId;
 
     #[test]
     fn invalid_arguments_maps_to_exit_code_one() {
@@ -328,7 +332,7 @@ mod tests {
 
     #[test]
     fn command_context_preserves_source_contract() {
-        let error = AppError::max_bytes_exceeded(1, 2).with_command("locate");
+        let error = AppError::max_bytes_exceeded(1, 2).with_command(CommandId::Locate);
         let value =
             serde_json::from_str::<serde_json::Value>(&error.to_json()).expect("json should parse");
 
@@ -349,6 +353,26 @@ mod tests {
             value["error"]["hint"],
             "Pass larger `--max-bytes` or fewer files."
         );
+    }
+
+    #[test]
+    fn command_context_tags_stay_exact_at_json_boundary() {
+        let cases = [
+            (CommandId::Ask, "ask"),
+            (CommandId::Brief, "brief"),
+            (CommandId::Locate, "locate"),
+            (CommandId::Doctor, "doctor"),
+            (CommandId::Setup, "setup"),
+            (CommandId::Init, "init"),
+        ];
+
+        for (command, expected) in cases {
+            let error = AppError::model_request_failed("down").with_command(command);
+            let value = serde_json::from_str::<serde_json::Value>(&error.to_json())
+                .expect("json should parse");
+
+            assert_eq!(value["command"], expected);
+        }
     }
 
     #[test]

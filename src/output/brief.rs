@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 
 use super::{
-    BRIEF_COMMAND, CommandMetadata, SCHEMA_VERSION, STATUS_OK,
+    CommandId, CommandMetadata, SCHEMA_VERSION, STATUS_OK,
     bounds::{MAX_MODEL_STRING_CHARS, NormalizationNotes, cap_rows, truncate_model_string},
 };
 
@@ -51,7 +51,7 @@ pub(crate) struct BriefOutput {
     /// JSON schema version.
     schema_version: &'static str,
     /// Command tag.
-    command: &'static str,
+    command: CommandId,
     /// Output status.
     status: &'static str,
     /// Goal text.
@@ -172,7 +172,7 @@ impl BriefOutput {
 
         Self {
             schema_version: SCHEMA_VERSION,
-            command: BRIEF_COMMAND,
+            command: CommandId::Brief,
             status: STATUS_OK,
             goal: goal.to_owned(),
             brief: value.brief,

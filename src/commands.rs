@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, error::ErrorKind};
 
-use crate::{Cli, Command, error::AppError};
+use crate::{Cli, Command, error::AppError, output::CommandId};
 
 /// Ask command run flow.
 mod ask;
@@ -43,16 +43,24 @@ fn try_run() -> Result<ExitCode, AppError> {
     let cli = parse_cli()?;
 
     match cli.command {
-        Command::Ask(args) => ask::run_ask(args).map_err(|error| error.with_command("ask")),
-        Command::Brief(args) => brief::run_brief(args).map_err(|error| error.with_command("brief")),
+        Command::Ask(args) => {
+            ask::run_ask(args).map_err(|error| error.with_command(CommandId::Ask))
+        }
+        Command::Brief(args) => {
+            brief::run_brief(args).map_err(|error| error.with_command(CommandId::Brief))
+        }
         Command::Locate(args) => {
-            locate::run_locate(args).map_err(|error| error.with_command("locate"))
+            locate::run_locate(args).map_err(|error| error.with_command(CommandId::Locate))
         }
         Command::Doctor(args) => {
-            doctor::run_doctor(args).map_err(|error| error.with_command("doctor"))
+            doctor::run_doctor(args).map_err(|error| error.with_command(CommandId::Doctor))
         }
-        Command::Setup(args) => setup::run_setup(args).map_err(|error| error.with_command("setup")),
-        Command::Init(args) => init::run_init(args).map_err(|error| error.with_command("init")),
+        Command::Setup(args) => {
+            setup::run_setup(args).map_err(|error| error.with_command(CommandId::Setup))
+        }
+        Command::Init(args) => {
+            init::run_init(args).map_err(|error| error.with_command(CommandId::Init))
+        }
     }
 }
 
