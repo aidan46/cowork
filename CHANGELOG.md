@@ -1,29 +1,25 @@
-# Changelog
+# Unreleased
 
-All notable changes to `cowork` land here.
+# v0.5.0, 2026-06-09
 
-## Unreleased
-
-## v0.5.0, 2026-06-09
-
-### Added
+## Added
 
 - `cowork setup` recommends local model, optionally pulls it, writes ask config
   only when requested, and probes available chosen model
 
-### Changed
+## Changed
 
 - `cowork doctor` now reports installed Ollama model state, requires exact
   effective-model match, and skips probe when model is missing
 
-## v0.4.0, 2026-06-08
+# v0.4.0, 2026-06-08
 
-### Added
+## Added
 
 - command-aware JSON errors for `ask`, `brief`, `locate`, and fallback `cli`
 - `NO_INPUT_FILES` when zero readable UTF-8 text files survive path loading
 
-### Changed
+## Changed
 
 - missing paths fail by default, `--no-fail-on-missing` skips only missing
   paths
@@ -31,43 +27,43 @@ All notable changes to `cowork` land here.
 - `metadata.output_bytes` now reports final JSON byte count after normalization
 - README now documents v0.4.0 reliability behavior for users and scripts
 
-## v0.3.0, 2026-06-07
+# v0.3.0, 2026-06-07
 
-### Added
+## Added
 
 - `cowork brief` for compact, goal-focused context packs
 - documented `locate` then `brief` workflow for cloud-agent handoff
 - generated Codex and Claude init rules teaching when to use `locate` and `brief`
 
-### Changed
+## Changed
 
 - CLI now owns byte counts, duration, output size, and meaningful compression ratios
 - `cowork ask` normalizes model rows and caps response collections for stable output
 
-## v0.2.0, 2026-05-21
+# v0.2.0, 2026-05-21
 
-### Added
+## Added
 
 - `cowork doctor` for local setup diagnostics and probe checks
 - `cowork init codex --print` and `cowork init claude --print`
 - `cowork init codex --write` and `cowork init claude --write`
 - `cowork locate` for symbol and file lookup
 
-### Changed
+## Changed
 
 - split output helpers and command runner into narrower modules
 - lint policy now blocks production `expect` and `unwrap`
 
-## v0.1.0, 2026-05-20
+# v0.1.0, 2026-05-20
 
-### Added
+## Added
 
 - `cowork ask` for narrow repo questions against local Ollama-compatible `/api/generate`.
 - config precedence: CLI flags, then `./cowork.toml`, then `$HOME/.cowork/config.toml`
 - recursive file loading with `--recursive`, `--include`, `--exclude`, and `--max-bytes`
 - deterministic JSON success and error output with fixed top-level fields
 
-### Notes
+## Notes
 
 - first public GitHub release is source-only
 - supported run path today is from source repo with Cargo

@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+write_fixture() {
+  local version="$1"
+  local lock_version="$2"
+  local heading="$3"
+
+  cat >"${tmp_dir}/Cargo.toml" <<EOF
+[package]
+name = "cowork"
+version = "${version}"
+EOF
+
+  cat >"${tmp_dir}/Cargo.lock" <<EOF
+version = 4
+
+[[package]]
+name = "cowork"
+version = "${lock_version}"
+EOF
+
+  printf '# Unreleased\n\n%s\n\n## Added\n\n- fixture\n' \
+    "$heading" >"${tmp_dir}/CHANGELOG.md"
+}
+
+run_validate() {
+  scripts/release/validate \
+    "$1" \
+    "${tmp_dir}/Cargo.toml" \
+    "${tmp_dir}/Cargo.lock" \
+    "${tmp_dir}/CHANGELOG.md"
+}
+
+write_fixture "1.2.3" "1.2.3" "# v1.2.3, 2026-06-10"
+run_validate "v1.2.3"
+
+write_fixture "1.2.3" "1.2.4" "# v1.2.3, 2026-06-10"
+if run_validate "v1.2.3" >/dev/null 2>&1; then
+  echo "version mismatch fixture passed" >&2
+  exit 1
+fi
+
+write_fixture "1.2.3" "1.2.3" "# v1.2.2, 2026-06-10"
+if run_validate "v1.2.3" >/dev/null 2>&1; then
+  echo "missing CHANGELOG fixture passed" >&2
+  exit 1
+fi
+
+write_fixture "1.2.3" "1.2.3" "# v1.2.3, 2026-06-10"
+if run_validate "v1.2.3-rc.1" >/dev/null 2>&1; then
+  echo "invalid tag fixture passed" >&2
+  exit 1
+fi
+
+cat >"${tmp_dir}/release-manifest.txt" <<'EOF'
+cowork-aarch64-apple-darwin.tar.xz
+cowork-aarch64-apple-darwin.tar.xz.sha256
+cowork-installer.sh
+cowork-x86_64-apple-darwin.tar.xz
+cowork-x86_64-apple-darwin.tar.xz.sha256
+cowork-x86_64-unknown-linux-gnu.tar.xz
+cowork-x86_64-unknown-linux-gnu.tar.xz.sha256
+EOF
+
+diff -u "${tmp_dir}/release-manifest.txt" release-manifest.txt
+
+if grep -E 'uses:' .github/workflows/release.yml \
+  | grep -Ev '@[0-9a-f]{40}$'; then
+  echo "mutable action reference found" >&2
+  exit 1
+fi

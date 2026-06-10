@@ -1,0 +1,305 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/release.yml"
+      - "CHANGELOG.md"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "dist-workspace.toml"
+      - "docs/release-workflow.md"
+      - "release-manifest.txt"
+      - "scripts/release/**"
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: "1.96.0"
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-dist
+        run: |
+          scripts/release/install-cargo-dist "$RUNNER_TEMP/cargo-dist-bin"
+          echo "$RUNNER_TEMP/cargo-dist-bin" >> "$GITHUB_PATH"
+
+      - name: Validate release metadata
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+        run: scripts/release/validate "$RELEASE_TAG"
+
+      - name: Validate release fixtures and pins
+        run: scripts/release/test
+
+      - name: Validate cargo-dist plan
+        run: |
+          dist plan --output-format=json --no-local-paths > release-plan.json
+          while IFS= read -r asset; do
+            grep -F "\"$asset\"" release-plan.json >/dev/null
+          done < release-manifest.txt
+          if grep -Eq 'cowork-(aarch64-unknown-linux|x86_64-unknown-linux-musl|pc-windows)' \
+            release-plan.json; then
+            echo "cargo-dist plan contains forbidden target" >&2
+            exit 1
+          fi
+
+  build:
+    if: github.event_name == 'push'
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            container: ""
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            container: ""
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            container: rust:1.96.0-bullseye@sha256:ae411a6ed4812ea54668cf819566e950b162d59a94fde0fa298cf7bb400f6b3f
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container || null }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust on macOS
+        if: runner.os == 'macOS'
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: 1.96.0
+
+      - name: Verify Rust version
+        run: rustc --version | grep -F "rustc $RUST_VERSION"
+
+      - name: Install cargo-dist
+        run: |
+          scripts/release/install-cargo-dist "$RUNNER_TEMP/cargo-dist-bin"
+          echo "$RUNNER_TEMP/cargo-dist-bin" >> "$GITHUB_PATH"
+
+      - name: Build archive
+        run: |
+          export REAL_CARGO="$(command -v cargo)"
+          export CARGO="$GITHUB_WORKSPACE/scripts/release/cargo-locked"
+          dist build \
+            --tag="$GITHUB_REF_NAME" \
+            --artifacts=local \
+            --target="${{ matrix.target }}" \
+            --print=linkage \
+            --output-format=json > dist-manifest.json
+
+      - name: Verify archive checksum
+        run: |
+          archive="target/distrib/cowork-${{ matrix.target }}.tar.xz"
+          test -f "$archive"
+          test -f "$archive.sha256"
+          scripts/release/verify-checksum "$archive"
+
+      - name: Record GNU linkage and runtime floor
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          binary="target/${{ matrix.target }}/dist/cowork"
+          ldd --version 2>&1 | sed -n '1p'
+          ldd "$binary"
+          max_glibc="$(objdump -T "$binary" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -n 1)"
+          echo "highest required symbol: $max_glibc"
+          test "$(printf '%s\n' "$max_glibc" GLIBC_2.31 | sort -V | tail -n 1)" = "GLIBC_2.31"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            target/distrib/cowork-${{ matrix.target }}.tar.xz
+            target/distrib/cowork-${{ matrix.target }}.tar.xz.sha256
+
+  packaged-smoke:
+    if: github.event_name == 'push'
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            container: ""
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            container: ""
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            container: rust:1.96.0-bullseye@sha256:ae411a6ed4812ea54668cf819566e950b162d59a94fde0fa298cf7bb400f6b3f
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container || null }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Download archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-${{ matrix.target }}
+          path: release
+
+      - name: Verify packaged archive
+        run: |
+          archive="cowork-${{ matrix.target }}.tar.xz"
+          scripts/release/verify-checksum "release/$archive"
+          mkdir release/unpacked
+          tar -xJf "release/$archive" -C release/unpacked
+          package="release/unpacked/cowork-${{ matrix.target }}"
+          test -f "$package/README.md"
+          test -f "$package/CHANGELOG.md"
+          test -f "$package/LICENSE-MIT"
+          test -f "$package/LICENSE-APACHE"
+          "$package/cowork" --help
+
+  installer:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Download archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: release-*
+          path: target/distrib
+          merge-multiple: true
+
+      - name: Install cargo-dist
+        run: |
+          scripts/release/install-cargo-dist "$RUNNER_TEMP/cargo-dist-bin"
+          echo "$RUNNER_TEMP/cargo-dist-bin" >> "$GITHUB_PATH"
+
+      - name: Generate shell installer
+        run: |
+          dist build \
+            --tag="$GITHUB_REF_NAME" \
+            --artifacts=global \
+            --output-format=json > dist-manifest.json
+
+      - name: Verify installer scope
+        run: |
+          installer="target/distrib/cowork-installer.sh"
+          test -f "$installer"
+          test "$(grep -c '^            _bins="cowork"$' "$installer")" -eq 3
+          test "$(grep -c '^            _updater_name=""$' "$installer")" -eq 3
+          grep -F 'cowork-aarch64-apple-darwin.tar.xz' "$installer"
+          grep -F 'cowork-x86_64-apple-darwin.tar.xz' "$installer"
+          grep -F 'cowork-x86_64-unknown-linux-gnu.tar.xz' "$installer"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-installer
+          if-no-files-found: error
+          path: target/distrib/cowork-installer.sh
+
+  attest:
+    if: github.event_name == 'push'
+    needs: [packaged-smoke, installer]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
+      - name: Verify release manifest and checksums
+        run: |
+          find release -maxdepth 1 -type f -printf '%f\n' | sort > actual-manifest.txt
+          diff -u release-manifest.txt actual-manifest.txt
+          for checksum in release/*.tar.xz.sha256; do
+            scripts/release/verify-checksum "${checksum%.sha256}"
+          done
+
+      - name: Attest archives
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
+        with:
+          subject-path: release/*.tar.xz
+
+      - name: Attest installer
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
+        with:
+          subject-path: release/cowork-installer.sh
+
+  release:
+    if: github.event_name == 'push'
+    needs: attest
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
+      - name: Verify release assets
+        run: |
+          find release -maxdepth 1 -type f -printf '%f\n' | sort > actual-manifest.txt
+          diff -u release-manifest.txt actual-manifest.txt
+          for checksum in release/*.tar.xz.sha256; do
+            scripts/release/verify-checksum "${checksum%.sha256}"
+          done
+
+      - name: Extract release notes
+        run: scripts/release/notes "$GITHUB_REF_NAME" > release-notes.md
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
+        with:
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            release/cowork-aarch64-apple-darwin.tar.xz
+            release/cowork-aarch64-apple-darwin.tar.xz.sha256
+            release/cowork-installer.sh
+            release/cowork-x86_64-apple-darwin.tar.xz
+            release/cowork-x86_64-apple-darwin.tar.xz.sha256
+            release/cowork-x86_64-unknown-linux-gnu.tar.xz
+            release/cowork-x86_64-unknown-linux-gnu.tar.xz.sha256

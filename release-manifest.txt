@@ -1,0 +1,7 @@
+cowork-aarch64-apple-darwin.tar.xz
+cowork-aarch64-apple-darwin.tar.xz.sha256
+cowork-installer.sh
+cowork-x86_64-apple-darwin.tar.xz
+cowork-x86_64-apple-darwin.tar.xz.sha256
+cowork-x86_64-unknown-linux-gnu.tar.xz
+cowork-x86_64-unknown-linux-gnu.tar.xz.sha256
