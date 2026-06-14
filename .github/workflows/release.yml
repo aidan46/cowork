@@ -164,15 +164,9 @@ jobs:
       - name: Verify packaged archive
         run: |
           archive="cowork-${{ matrix.target }}.tar.xz"
-          scripts/release/verify-checksum "release/$archive"
-          mkdir release/unpacked
-          tar -xJf "release/$archive" -C release/unpacked
-          package="release/unpacked/cowork-${{ matrix.target }}"
-          test -f "$package/README.md"
-          test -f "$package/CHANGELOG.md"
-          test -f "$package/LICENSE-MIT"
-          test -f "$package/LICENSE-APACHE"
-          "$package/cowork" --help
+          scripts/release/verify-archive \
+            "${{ matrix.target }}" \
+            "release/$archive"
 
   installer:
     if: github.event_name == 'push'
@@ -203,15 +197,10 @@ jobs:
             --artifacts=global \
             --output-format=json > dist-manifest.json
 
-      - name: Verify installer scope
+      - name: Verify installer scope and behavior
         run: |
           installer="target/distrib/cowork-installer.sh"
-          test -f "$installer"
-          test "$(grep -c '^            _bins="cowork"$' "$installer")" -eq 3
-          test "$(grep -c '^            _updater_name=""$' "$installer")" -eq 3
-          grep -F 'cowork-aarch64-apple-darwin.tar.xz' "$installer"
-          grep -F 'cowork-x86_64-apple-darwin.tar.xz' "$installer"
-          grep -F 'cowork-x86_64-unknown-linux-gnu.tar.xz' "$installer"
+          scripts/release/verify-installer "$installer" target/distrib
 
       - name: Upload installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

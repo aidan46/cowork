@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target="${1:?usage: verify-archive TARGET ARCHIVE [CARGO_TOML]}"
+archive="${2:?usage: verify-archive TARGET ARCHIVE [CARGO_TOML]}"
+cargo_toml="${3:-Cargo.toml}"
+
+package_version="$({
+  awk '
+    $0 == "[package]" { inside = 1; next }
+    inside && /^\[/ { exit }
+    inside && /^version = "/ {
+      value = $0
+      sub(/^version = "/, "", value)
+      sub(/".*$/, "", value)
+      print value
+      exit
+    }
+  ' "$cargo_toml"
+})"
+
+if [[ -z "$package_version" ]]; then
+  echo "missing cowork package version" >&2
+  exit 1
+fi
+
+scripts/release/verify-checksum "$archive"
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+unpacked="$tmp_dir/unpacked"
+mkdir "$unpacked"
+
+if find "$unpacked" -mindepth 1 -print -quit | grep -q .; then
+  echo "archive extraction directory is not empty" >&2
+  exit 1
+fi
+
+tar -xJf "$archive" -C "$unpacked"
+package="cowork-${target}"
+binary="$unpacked/$package/cowork"
+
+cat >"$tmp_dir/expected-files" <<EOF
+./$package
+./$package/CHANGELOG.md
+./$package/LICENSE-APACHE
+./$package/LICENSE-MIT
+./$package/README.md
+./$package/cowork
+EOF
+
+(
+  cd "$unpacked"
+  find . -mindepth 1 -print | LC_ALL=C sort
+) >"$tmp_dir/actual-files"
+diff -u "$tmp_dir/expected-files" "$tmp_dir/actual-files"
+test -x "$binary"
+
+file_output="$(LC_ALL=C file -b "$binary")"
+case "$target" in
+  aarch64-apple-darwin)
+    [[ "$(uname -s)" == "Darwin" ]]
+    [[ "$(uname -m)" == "arm64" ]]
+    [[ "$file_output" == Mach-O\ 64-bit\ executable\ arm64* ]]
+    [[ "$(lipo -archs "$binary")" == "arm64" ]]
+    ;;
+  x86_64-apple-darwin)
+    [[ "$(uname -s)" == "Darwin" ]]
+    [[ "$(uname -m)" == "x86_64" ]]
+    [[ "$file_output" == Mach-O\ 64-bit\ executable\ x86_64* ]]
+    [[ "$(lipo -archs "$binary")" == "x86_64" ]]
+    ;;
+  x86_64-unknown-linux-gnu)
+    [[ "$(uname -s)" == "Linux" ]]
+    [[ "$(uname -m)" == "x86_64" ]]
+    [[ "$file_output" == ELF\ 64-bit\ LSB*executable*x86-64* ]]
+    readelf -h "$binary" >"$tmp_dir/readelf"
+    grep -Eq '^[[:space:]]*Class:[[:space:]]+ELF64$' "$tmp_dir/readelf"
+    grep -Eq '^[[:space:]]*Machine:[[:space:]]+Advanced Micro Devices X86-64$' \
+      "$tmp_dir/readelf"
+    ;;
+  *)
+    echo "unsupported release target: $target" >&2
+    exit 1
+    ;;
+esac
+
+mkdir "$tmp_dir/home"
+HOME="$tmp_dir/home" "$binary" --version \
+  >"$tmp_dir/version.stdout" 2>"$tmp_dir/version.stderr"
+printf 'cowork %s\n' "$package_version" >"$tmp_dir/version.expected"
+cmp "$tmp_dir/version.expected" "$tmp_dir/version.stdout"
+test ! -s "$tmp_dir/version.stderr"
+
+HOME="$tmp_dir/home" "$binary" --help \
+  >"$tmp_dir/help.stdout" 2>"$tmp_dir/help.stderr"
+test -s "$tmp_dir/help.stdout"
+
+HOME="$tmp_dir/home" "$binary" init codex --print \
+  >"$tmp_dir/init.stdout" 2>"$tmp_dir/init.stderr"
+test ! -s "$tmp_dir/init.stderr"
+grep -Fx '# cowork rules for Codex' "$tmp_dir/init.stdout" >/dev/null
+grep -F 'cowork locate' "$tmp_dir/init.stdout" >/dev/null
+grep -F 'cowork ask' "$tmp_dir/init.stdout" >/dev/null
+grep -F 'cowork brief' "$tmp_dir/init.stdout" >/dev/null
+
+printf '%s: packaged archive verified\n' "$target"

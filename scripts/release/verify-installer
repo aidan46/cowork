@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+installer="${1:?usage: verify-installer INSTALLER ASSET_DIR [CARGO_TOML]}"
+asset_dir="${2:?usage: verify-installer INSTALLER ASSET_DIR [CARGO_TOML]}"
+cargo_toml="${3:-Cargo.toml}"
+target="x86_64-unknown-linux-gnu"
+archive_name="cowork-${target}.tar.xz"
+
+if [[ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]]; then
+  echo "installer smoke requires native Linux x86_64" >&2
+  exit 1
+fi
+
+package_version="$({
+  awk '
+    $0 == "[package]" { inside = 1; next }
+    inside && /^\[/ { exit }
+    inside && /^version = "/ {
+      value = $0
+      sub(/^version = "/, "", value)
+      sub(/".*$/, "", value)
+      print value
+      exit
+    }
+  ' "$cargo_toml"
+})"
+
+if [[ -z "$package_version" ]]; then
+  echo "missing cowork package version" >&2
+  exit 1
+fi
+
+asset_dir="$(cd "$asset_dir" && pwd -P)"
+archive="$asset_dir/$archive_name"
+test -f "$installer"
+test -f "$archive"
+test -f "$archive.sha256"
+
+test "$(grep -c '^            _bins="cowork"$' "$installer")" -eq 3
+test "$(grep -c '^            _updater_name=""$' "$installer")" -eq 3
+grep -F 'cowork-aarch64-apple-darwin.tar.xz' "$installer" >/dev/null
+grep -F 'cowork-x86_64-apple-darwin.tar.xz' "$installer" >/dev/null
+grep -F "$archive_name" "$installer" >/dev/null
+grep -F "APP_VERSION=\"$package_version\"" "$installer" >/dev/null
+
+if grep -Eiq 'ollama|systemctl|(^|[^[:alnum:]_])service([[:space:](]|$)' "$installer"; then
+  echo "installer contains Ollama or service command" >&2
+  exit 1
+fi
+
+scripts/release/verify-checksum "$archive"
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+home="$tmp_dir/home"
+cargo_home="$tmp_dir/cargo"
+trace_dir="$tmp_dir/trace"
+trap_bin="$tmp_dir/trap-bin"
+github_path="$tmp_dir/github-path"
+mkdir "$home" "$cargo_home" "$trace_dir" "$trap_bin"
+
+real_curl="$(command -v curl)"
+cat >"$trap_bin/curl" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$TRACE_DIR/curl"
+case "$*" in
+  *http://* | *https://*)
+    echo "installer attempted network download" >&2
+    exit 97
+    ;;
+esac
+exec "$REAL_CURL" "$@"
+EOF
+chmod 0755 "$trap_bin/curl"
+
+for command in ollama systemctl service; do
+  cat >"$trap_bin/$command" <<'EOF'
+#!/bin/sh
+printf '%s %s\n' "$(basename "$0")" "$*" >>"$TRACE_DIR/forbidden"
+exit 98
+EOF
+  chmod 0755 "$trap_bin/$command"
+done
+
+env -i \
+  HOME="$home" \
+  CARGO_HOME="$cargo_home" \
+  XDG_CONFIG_HOME="$home/.config" \
+  SHELL=/bin/bash \
+  PATH="$trap_bin:$PATH" \
+  GITHUB_PATH="$github_path" \
+  COWORK_DOWNLOAD_URL="file://$asset_dir" \
+  TRACE_DIR="$trace_dir" \
+  REAL_CURL="$real_curl" \
+  sh "$installer" >"$tmp_dir/installer.stdout" 2>"$tmp_dir/installer.stderr"
+
+test ! -e "$trace_dir/forbidden"
+grep -F "file://$asset_dir/$archive_name" "$trace_dir/curl" >/dev/null
+
+if [[ "$(uname -r)" == *linuxkit* ]]; then
+  rmdir "$home/.cache/rosetta" "$home/.cache" 2>/dev/null || true
+fi
+
+cat >"$tmp_dir/home.expected" <<'EOF'
+./.config
+./.config/cowork
+./.config/cowork/cowork-receipt.json
+./.config/fish
+./.config/fish/conf.d
+./.config/fish/conf.d/cowork.env.fish
+./.profile
+./.zshrc
+EOF
+(
+  cd "$home"
+  find . -mindepth 1 -print | LC_ALL=C sort
+) >"$tmp_dir/home.actual"
+diff -u "$tmp_dir/home.expected" "$tmp_dir/home.actual"
+
+cat >"$tmp_dir/cargo.expected" <<'EOF'
+./bin
+./bin/cowork
+./env
+./env.fish
+EOF
+(
+  cd "$cargo_home"
+  find . -mindepth 1 -print | LC_ALL=C sort
+) >"$tmp_dir/cargo.actual"
+diff -u "$tmp_dir/cargo.expected" "$tmp_dir/cargo.actual"
+
+printf '%s\n' "$cargo_home/bin" >"$tmp_dir/github-path.expected"
+cmp "$tmp_dir/github-path.expected" "$github_path"
+grep -F "export PATH=\"$cargo_home/bin:\$PATH\"" "$cargo_home/env" >/dev/null
+grep -F ". \"$cargo_home/env\"" "$home/.profile" >/dev/null
+grep -F ". \"$cargo_home/env\"" "$home/.zshrc" >/dev/null
+grep -F "source \"$cargo_home/env.fish\"" \
+  "$home/.config/fish/conf.d/cowork.env.fish" >/dev/null
+
+resolved="$({
+  HOME="$home" PATH=/usr/bin:/bin sh -c '. "$1"; command -v cowork' \
+    sh "$cargo_home/env"
+})"
+[[ "$resolved" == "$cargo_home/bin/cowork" ]]
+
+"$cargo_home/bin/cowork" --version \
+  >"$tmp_dir/version.stdout" 2>"$tmp_dir/version.stderr"
+printf 'cowork %s\n' "$package_version" >"$tmp_dir/version.expected"
+cmp "$tmp_dir/version.expected" "$tmp_dir/version.stdout"
+test ! -s "$tmp_dir/version.stderr"
+
+python3 - "$home/.config/cowork/cowork-receipt.json" \
+  "$cargo_home" "$package_version" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as receipt_file:
+    receipt = json.load(receipt_file)
+
+assert receipt["binaries"] == ["cowork"]
+assert receipt["cdylibs"] == []
+assert receipt["cstaticlibs"] == []
+assert receipt["install_layout"] == "cargo-home"
+assert receipt["install_prefix"] == sys.argv[2]
+assert receipt["modify_path"] is True
+assert receipt["provider"] == {"source": "cargo-dist", "version": "0.32.0"}
+assert receipt["source"]["app_name"] == "cowork"
+assert receipt["version"] == sys.argv[3]
+PY
+
+printf '%s\n' 'Linux installer verified'

@@ -13,8 +13,11 @@ config, fixture, permission, and pin checks only.
 
 GNU chosen over musl. Debian 11 build floor is glibc 2.31. Build job records
 `ldd`, linked libraries, and highest required GLIBC symbol. Separate smoke job
-verifies checksum, unpacks archive, and runs packaged `cowork --help`. Musl
-would need cross tools on glibc CI or Alpine compatibility for JavaScript
+verifies checksum before extraction into empty temp dir. It requires exact
+package files, native executable format and architecture, exact version output
+with empty stderr, working help, and Markdown rules from
+`cowork init codex --print` with empty stderr.
+Musl would need cross tools on glibc CI or Alpine compatibility for JavaScript
 actions. GNU keeps native build and explicit runtime floor.
 
 ## Assets
@@ -31,6 +34,12 @@ Archives contain `cowork`, README, CHANGELOG, MIT license, and Apache license.
 Installer selects only listed archives and installs only `cowork` under Cargo
 home. `release-manifest.txt` is upload allowlist.
 
+Linux installer smoke runs generated script before upload. `COWORK_DOWNLOAD_URL`
+points it at checked local workflow assets through `file://`; unpublished GitHub
+assets are never fetched. Smoke uses isolated `HOME` and `CARGO_HOME`, checks
+installed version and receipt, allowlists all writes, verifies PATH files and
+`GITHUB_PATH`, and rejects network, Ollama, or service commands.
+
 ## Trust
 
 - cargo-dist pinned to `0.32.0`; host archives use hard-coded SHA-256
@@ -39,6 +48,7 @@ home. `release-manifest.txt` is upload allowlist.
 - every action pinned by commit
 - archive checksums verified after build, during packaged smoke, and before
   release upload
+- installer upload waits for isolated local-asset smoke
 - attestation job alone gets OIDC and attestation writes
 - release job alone gets `contents: write`
 - matching CHANGELOG section is sole GitHub release body
