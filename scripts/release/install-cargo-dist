@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly version="0.32.0"
+readonly base_url="https://github.com/axodotdev/cargo-dist/releases/download/v${version}"
+readonly install_dir="${1:?usage: install-cargo-dist INSTALL_DIR}"
+
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64)
+    target="aarch64-apple-darwin"
+    expected="aa343b2ff78ec2981f17a65140250c5ad6062c74072163f68c5c2686d94763a7"
+    ;;
+  Darwin-x86_64)
+    target="x86_64-apple-darwin"
+    expected="6243464a8389e006b9256ee548bc795638f1a17113c1b6669c0e05ce89fd05c5"
+    ;;
+  Linux-x86_64)
+    target="x86_64-unknown-linux-musl"
+    expected="0d9dc001b0e937e9cc18e0dc11784aa7a3fd566656b07828d5e1d10ce1c1c48c"
+    ;;
+  *)
+    echo "unsupported cargo-dist host: $(uname -s)-$(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+archive="cargo-dist-${target}.tar.xz"
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+curl --proto '=https' --tlsv1.2 -fLsS \
+  --connect-timeout 15 \
+  --max-time 180 \
+  --retry 3 \
+  "${base_url}/${archive}" \
+  -o "${tmp_dir}/${archive}"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "${tmp_dir}/${archive}" | awk '{print $1}')"
+else
+  actual="$(shasum -a 256 "${tmp_dir}/${archive}" | awk '{print $1}')"
+fi
+
+if [[ "$actual" != "$expected" ]]; then
+  echo "cargo-dist checksum mismatch: expected $expected, got $actual" >&2
+  exit 1
+fi
+
+tar -xJf "${tmp_dir}/${archive}" -C "$tmp_dir"
+mkdir -p "$install_dir"
+cp "${tmp_dir}/cargo-dist-${target}/dist" "${install_dir}/dist"
+chmod 0755 "${install_dir}/dist"
+
+if [[ "$("${install_dir}/dist" --version)" != "cargo-dist ${version}" ]]; then
+  echo "cargo-dist version mismatch" >&2
+  exit 1
+fi

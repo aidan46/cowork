@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tag="${1:?usage: notes TAG [CHANGELOG]}"
+changelog="${2:-CHANGELOG.md}"
+
+awk -v tag="$tag" '
+  $0 == "# " tag || index($0, "# " tag ", ") == 1 { found = 1; next }
+  found && /^# / { exit }
+  found { print }
+  END { if (!found) exit 1 }
+' "$changelog"

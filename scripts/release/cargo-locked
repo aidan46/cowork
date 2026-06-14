@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_cargo="${REAL_CARGO:?REAL_CARGO is required}"
+command="${1:-}"
+
+case "$command" in
+  build | metadata)
+    shift
+    exec "$real_cargo" "$command" --locked "$@"
+    ;;
+  *)
+    exec "$real_cargo" "$@"
+    ;;
+esac
