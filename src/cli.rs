@@ -5,6 +5,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueHint};
 /// Parsed `cowork` args.
 #[derive(Debug, Parser)]
 #[command(name = "cowork")]
+#[command(version)]
 #[command(about = "Local AI coworker CLI for coding agents", long_about = None)]
 #[command(subcommand_required = true, arg_required_else_help = true)]
 pub struct Cli {
