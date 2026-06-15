@@ -1,54 +1,47 @@
 # cowork
 
-Focus repo question in, deterministic JSON out.
+Focused repo questions in, schema-checked JSON out through a local model endpoint.
 
-`cowork` is local CLI for coding agents. It reads only files you point at, sends one narrow prompt to local Ollama-compatible `/api/generate` endpoint, then prints schema-checked JSON on stdout.
+[![CI](https://github.com/aidan46/cowork/actions/workflows/ci-rust.yml/badge.svg)](https://github.com/aidan46/cowork/actions/workflows/ci-rust.yml)
+[![Release: v0.6.0-rc.1](https://img.shields.io/badge/release-v0.6.0--rc.1-orange.svg)](https://github.com/aidan46/cowork/releases/tag/v0.6.0-rc.1)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
 
-Main win: cut expensive cloud-model context use. Instead of pasting raw repo files into hosted model, agent can ask `cowork` for narrow local analysis and get back compact JSON.
+> `v0.6.0-rc.1` is a prerelease. No stable `v0.6.0` installer is published.
 
-## About
-
-`cowork` is for mixed local-plus-cloud workflows.
-
-- local model does narrow repo read
-- hosted model gets small structured result
-- cloud token use drops because raw file dumps stay out of hosted context
-- output stays deterministic enough for scripts and agents
-
-It does not remove token use entirely. It shifts repo-context work from expensive hosted context toward cheaper local inference.
-
-## Why it exists
-
-When agent or script needs one repo-grounded answer, whole-repo scans and raw file paste are waste. `cowork` keeps hosted context small, config simple, output stable.
-
-## Quickstart
-
-Current release path is source checkout only. No crates.io package or prebuilt binaries yet.
+## Install and run
 
 Prerequisites:
 
-- Rust toolchain
-- Ollama running locally
-- macOS: install from [official app page](https://ollama.com/download/mac), then ensure
-  `ollama` CLI is available in `PATH`
-- Linux: follow [official install page](https://ollama.com/download/linux)
-- Windows: unsupported and untested in v0.5.0
+- supported macOS or Linux platform listed below
+- [Ollama](https://ollama.com/download) installed and running
 
-Install from source checkout:
+Install exact prerelease asset:
 
 ```bash
-git clone https://github.com/aidan46/cowork.git
-cd cowork
-cargo install --path .
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/aidan46/cowork/releases/download/v0.6.0-rc.1/cowork-installer.sh | sh
 ```
 
-Choose recommended model, pull it when missing, write user config, then probe it:
+Installer places only `cowork` in `$CARGO_HOME/bin` or `$HOME/.cargo/bin`. It may
+update shell profiles for `PATH`. It never installs or starts Ollama.
+
+Confirm installed version:
+
+```bash
+cowork --version
+```
+
+```text
+cowork 0.6.0-rc.1
+```
+
+Choose a model, pull it when missing, write user config, then probe it:
 
 ```bash
 cowork setup --write-config --pull
 ```
 
-Ask without `--model` because setup wrote `[ask]` config:
+Ask one repo-grounded question:
 
 ```bash
 cowork ask \
@@ -56,149 +49,28 @@ cowork ask \
   --question "How does ask config precedence work?"
 ```
 
-Setup stays explicit and safe:
+## Output
 
-- bare `cowork setup` does not pull models or write config
-- `--pull` permits pulling chosen model when exact Ollama name is missing
-- `--write-config` permits config mutation and defaults to user config
-- with `--write-config`, `--user` selects `$HOME/.cowork/config.toml`
-- with `--write-config`, `--project` selects `./cowork.toml`
-- with `--write-config`, `--force` permits replacing different existing `[ask]`
-  model or host values
-- setup probes only installed or successfully pulled chosen model
-- setup never installs Ollama
-- stdout remains deterministic JSON
-
-Run `cowork doctor` for separate read-only diagnostics when setup reports problem.
-
-Or locate first, then decide what to read:
-
-```bash
-cowork locate \
-  --paths src \
-  --recursive \
-  --thing "CLI parser" \
-  --model your-model
-```
-
-Path handling defaults to strict mode:
-
-- missing provided path returns JSON error code `MISSING_PATH`
-- `--no-fail-on-missing` skips only missing paths, then continues with surviving inputs
-- if load ends with zero readable UTF-8 text files, command returns `NO_INPUT_FILES`
-
-## Token-saving workflow
-
-Use `locate` to find likely files first. Use `brief` next when cloud agent needs compact repo context instead of raw file dumps.
-
-Find likely files:
-
-```bash
-cowork locate \
-  --paths src \
-  --recursive \
-  --thing "where config precedence is resolved" \
-  --model your-model
-```
-
-Check `files`, `symbols`, and `evidence`, then build compact handoff:
-
-```bash
-cowork brief \
-  --paths src/config.rs src/commands/ask.rs \
-  --goal "change config precedence safely" \
-  --model your-model
-```
-
-Command output is JSON on stdout only. Redirect if you want file:
-
-```bash
-cowork brief \
-  --paths src/config.rs src/commands/ask.rs \
-  --goal "change config precedence safely" \
-  --model your-model > brief.json
-```
-
-Errors stay JSON on stdout too. Top-level `command` tells scripts whether failure came from
-`ask`, `brief`, `locate`, or fallback `cli`.
-
-Cloud-agent handoff block:
-
-```txt
-Use attached `brief.json` as advisory repo context.
-Inspect cited `evidence` paths before edits.
-Treat local-model `summary`, `risks`, and conclusions as advisory.
-If context is thin or stale, read source files directly before changing code.
-```
-
-Notes:
-
-- `metadata.input_bytes` is loaded input byte count, not exact token count
-- `metadata.output_bytes` is final JSON byte count after CLI normalization
-- `risks` can include CLI-added `unknown` notices when output caps or string truncation fire
-- inspect cited evidence before edits, not only model summary
-- `cowork` is for narrow repo questions, not whole-repo architecture sweeps
-- skip `cowork` when you already know exact files and need direct source reading or broad refactor validation
-
-If you use same model often, put it in config and drop `--model` from command:
-
-```toml
-[ask]
-model = "your-model"
-host = "http://localhost:11434"
-```
-
-Save that as `./cowork.toml` for one repo, or `$HOME/.cowork/config.toml` for user-wide defaults.
-See [config.example.toml](config.example.toml) for minimal starter config.
-
-## Config summary
-
-`cowork` reads `[ask]` from:
-
-- `./cowork.toml`
-- `$HOME/.cowork/config.toml`
-
-Supported keys:
-
-| Key | Meaning | Default | Precedence |
-| --- | --- | --- | --- |
-| `model` | model name sent to endpoint | none | CLI, project, user |
-| `host` | base URL for model endpoint | `http://localhost:11434` | CLI, project, user, built-in |
-
-## File loading
-
-- file paths load directly
-- directory paths need `--recursive`
-- `--include` and `--exclude` filter discovered files
-- explicit file args bypass `--include`, but still respect `--exclude`
-- missing paths fail by default with `MISSING_PATH`
-- `--no-fail-on-missing` skips only missing paths
-- `--max-bytes` fails hard when loaded input grows past limit
-- symlinks, binary files, and non-UTF-8 files are skipped
-- if no readable UTF-8 text files survive load, commands fail with `NO_INPUT_FILES`
-- recursive walks prune `.git`, `target`, `node_modules`, `dist`, `build`, `.next`, `.cache`, and `coverage`
-
-## Example output
-
-Example success shape:
+Commands print JSON on stdout, including errors. Exact output from a current
+local `ask` fixture:
 
 ```json
 {
   "schema_version": "1.0",
   "command": "ask",
   "status": "ok",
-  "question": "How does ask config precedence work?",
+  "question": "What does this function return?",
   "answer": {
-    "summary": "CLI flags win, then project config, then user config.",
+    "summary": "It returns 42.",
     "confidence": "high",
     "not_found": false
   },
   "files": [
     {
-      "path": "src/config.rs",
+      "path": "input.rs",
       "included": true,
-      "reason": "Loads and merges ask config.",
-      "bytes": 5293
+      "reason": "Defines the function.",
+      "bytes": 25
     }
   ],
   "symbols": [],
@@ -206,32 +78,188 @@ Example success shape:
   "risks": [],
   "next_reads": [],
   "metadata": {
-    "input_bytes": 5293,
-    "output_bytes": 612,
-    "duration_ms": 12
+    "input_bytes": 25,
+    "output_bytes": 384,
+    "duration_ms": 2
   }
 }
 ```
 
-Notes:
+Model text varies. Top-level framing, normalized fields, and JSON-only stdout are
+CLI-owned.
 
-- `metadata.output_bytes` is final JSON byte count after normalization
-- `risks` may include CLI-owned `unknown` notices when output caps or truncation fire
-- error responses keep same top-level `schema_version`, `command`, and `status` framing
+## Use cases
 
-## Scope today
+- `locate`: find likely files and symbols before loading more context
+- `brief`: build compact handoff context with evidence and risks
+- `ask`: answer a narrow question over selected files
+- `doctor`: run read-only local setup diagnostics
+- `setup`: choose and probe a model, with explicit mutation flags
+- `init`: print or write bounded agent instruction blocks
 
-- six subcommands: `setup`, `doctor`, `ask`, `locate`, `brief`, `init`
-- `setup` recommends local model and mutates only with explicit flags
-- `init --print` prints short agent rules
-- `init --write` writes bounded managed blocks to `AGENTS.md` or `CLAUDE.md`
-- JSON stdout only, even on errors
-- local-model summaries stay advisory, and bounded outputs may add CLI-owned risk notices
-- one Ollama-style model client
+Use `cowork` when a coding agent needs focused local analysis without pasting raw
+repo files into hosted context. Skip it for known-file edits, broad architecture
+reviews, or final validation that requires direct source inspection.
+
+## Safety boundary
+
+- Default model host is local: `http://localhost:11434`.
+- Overriding `--host` or `[ask].host` sends selected content to that endpoint.
+- Only explicit file paths, plus files discovered under explicit directories with
+  `--recursive`, can be loaded. `cowork` does not scan a repo by itself.
+- Include, exclude, byte-limit, UTF-8, binary, symlink, and missing-path rules run
+  before model requests.
+- Bare `cowork setup` does not pull models or write config.
+- `--pull` permits one Ollama model pull. `--write-config` permits config writes.
+- Local-model summaries and conclusions are advisory. Inspect cited evidence and
+  source before edits.
+
+## Supported platforms
+
+Published `v0.6.0-rc.1` artifacts:
+
+| Platform | Target | Asset | Status |
+| --- | --- | --- | --- |
+| macOS Apple Silicon | `aarch64-apple-darwin` | `cowork-aarch64-apple-darwin.tar.xz` | supported |
+| macOS Intel | `x86_64-apple-darwin` | `cowork-x86_64-apple-darwin.tar.xz` | supported |
+| Linux x86_64, glibc 2.31+ | `x86_64-unknown-linux-gnu` | `cowork-x86_64-unknown-linux-gnu.tar.xz` | supported |
+
+Windows, Linux ARM64, Linux musl, and other targets have no published RC artifact.
+They are unsupported and untested for this release candidate.
+
+## Verify or build
+
+### Manual archive verification
+
+Select target, then download exact archive and checksum:
+
+```bash
+version=v0.6.0-rc.1
+target=aarch64-apple-darwin
+# target=x86_64-apple-darwin
+# target=x86_64-unknown-linux-gnu
+archive="cowork-$target.tar.xz"
+base="https://github.com/aidan46/cowork/releases/download/$version"
+
+curl -fLO "$base/$archive"
+curl -fLO "$base/$archive.sha256"
+```
+
+Verify checksum on Linux or macOS:
+
+```bash
+if command -v sha256sum >/dev/null 2>&1; then
+  sed '/^[[:space:]]*$/d' "$archive.sha256" | sha256sum -c -
+else
+  sed '/^[[:space:]]*$/d' "$archive.sha256" | shasum -a 256 -c -
+fi
+```
+
+Verify GitHub artifact attestation:
+
+```bash
+gh attestation verify "$archive" --repo aidan46/cowork
+```
+
+Extract and install manually:
+
+```bash
+tar -xJf "$archive"
+mkdir -p "$HOME/.local/bin"
+install -m 0755 "cowork-$target/cowork" "$HOME/.local/bin/cowork"
+```
+
+Installer also has a published attestation:
+
+```bash
+curl -fL \
+  https://github.com/aidan46/cowork/releases/download/v0.6.0-rc.1/cowork-installer.sh \
+  -o cowork-installer.sh
+gh attestation verify cowork-installer.sh --repo aidan46/cowork
+```
+
+### Install from source
+
+Rust toolchain required:
+
+```bash
+git clone --branch v0.6.0-rc.1 --depth 1 https://github.com/aidan46/cowork.git
+cd cowork
+cargo install --path . --locked
+```
+
+## Workflows
+
+Locate likely files first:
+
+```bash
+cowork locate \
+  --paths src \
+  --recursive \
+  --thing "where config precedence is resolved"
+```
+
+Build compact handoff context:
+
+```bash
+cowork brief \
+  --paths src/config.rs src/commands/ask.rs \
+  --goal "change config precedence safely" > brief.json
+```
+
+Ask directly when file set is already known:
+
+```bash
+cowork ask \
+  --paths src/config.rs src/commands/ask.rs \
+  --question "Which config source wins?"
+```
+
+Add `--model your-model` when config has no model. Use `--no-fail-on-missing`
+only when skipping missing inputs is intended.
+
+## Config and files
+
+`cowork` reads `[ask]` from `./cowork.toml`, then
+`$HOME/.cowork/config.toml`:
+
+```toml
+[ask]
+model = "your-model"
+host = "http://localhost:11434"
+```
+
+Precedence:
+
+| Key | Order | Default |
+| --- | --- | --- |
+| `model` | CLI, project, user | none |
+| `host` | CLI, project, user, built-in | `http://localhost:11434` |
+
+File rules:
+
+- files load directly; directories require `--recursive`
+- explicit files bypass `--include`, but still respect `--exclude`
+- missing paths fail with `MISSING_PATH` unless `--no-fail-on-missing` is set
+- zero surviving readable UTF-8 files fails with `NO_INPUT_FILES`
+- `--max-bytes` fails when loaded input exceeds limit
+- symlinks, binary files, and non-UTF-8 files are skipped
+- recursive walks prune common generated and dependency directories
+
+See [config.example.toml](config.example.toml) for starter config.
+
+## Limits
+
+- one Ollama-compatible model client
 - no cache, daemon, or index layer
+- narrow selected-file questions, not automatic whole-repo analysis
+- model output can be incomplete or wrong
+- `metadata.input_bytes` and `metadata.output_bytes` are bytes, not token counts
 
-## Help and contributing
+## Project links
 
-- read [SUPPORT.md](SUPPORT.md) for usage questions and bug reports
-- read [CONTRIBUTING.md](CONTRIBUTING.md) before opening PR
-- use `cowork setup --help`, `cowork doctor --help`, `cowork ask --help`, `cowork locate --help`, `cowork brief --help`, and `cowork init --help` for current flag surface
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Support](SUPPORT.md)
+- [Release candidate](https://github.com/aidan46/cowork/releases/tag/v0.6.0-rc.1)
+- Licenses: [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE)
