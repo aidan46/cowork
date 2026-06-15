@@ -44,6 +44,22 @@ jobs:
       - name: Validate release fixtures and pins
         run: scripts/release/test
 
+      - name: Verify generated Linux installer
+        run: |
+          version="$(awk -F '"' '/^version = "/ { print $2; exit }' Cargo.toml)"
+          export REAL_CARGO="$(command -v cargo)"
+          export CARGO="$GITHUB_WORKSPACE/scripts/release/cargo-locked"
+          dist build \
+            --tag="v$version" \
+            --artifacts=all \
+            --target=x86_64-unknown-linux-gnu \
+            --output-format=json > generated-installer-manifest.json
+          scripts/release/verify-installer \
+            target/distrib/cowork-installer.sh \
+            target/distrib \
+            Cargo.toml \
+            linux
+
       - name: Validate cargo-dist plan
         run: |
           dist plan --output-format=json --no-local-paths > release-plan.json
@@ -104,6 +120,8 @@ jobs:
             --target="${{ matrix.target }}" \
             --print=linkage \
             --output-format=json > dist-manifest.json
+          cp dist-manifest.json \
+            "target/distrib/${{ matrix.target }}-dist-manifest.json"
 
       - name: Verify archive checksum
         run: |
@@ -130,6 +148,13 @@ jobs:
           path: |
             target/distrib/cowork-${{ matrix.target }}.tar.xz
             target/distrib/cowork-${{ matrix.target }}.tar.xz.sha256
+
+      - name: Upload internal build manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dist-manifest-${{ matrix.target }}
+          if-no-files-found: error
+          path: target/distrib/${{ matrix.target }}-dist-manifest.json
 
   packaged-smoke:
     if: github.event_name == 'push'
@@ -182,6 +207,13 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           pattern: release-*
+          path: target/distrib
+          merge-multiple: true
+
+      - name: Download internal build manifests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: dist-manifest-*
           path: target/distrib
           merge-multiple: true
 

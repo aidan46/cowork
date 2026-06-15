@@ -54,6 +54,12 @@ EOF
   find . -mindepth 1 -print | LC_ALL=C sort
 ) >"$tmp_dir/actual-files"
 diff -u "$tmp_dir/expected-files" "$tmp_dir/actual-files"
+test -d "$unpacked/$package"
+test ! -L "$unpacked/$package"
+for file in CHANGELOG.md LICENSE-APACHE LICENSE-MIT README.md cowork; do
+  test -f "$unpacked/$package/$file"
+  test ! -L "$unpacked/$package/$file"
+done
 test -x "$binary"
 
 file_output="$(LC_ALL=C file -b "$binary")"

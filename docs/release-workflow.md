@@ -38,7 +38,10 @@ Linux installer smoke runs generated script before upload. `COWORK_DOWNLOAD_URL`
 points it at checked local workflow assets through `file://`; unpublished GitHub
 assets are never fetched. Smoke uses isolated `HOME` and `CARGO_HOME`, checks
 installed version and receipt, allowlists all writes, verifies PATH files and
-`GITHUB_PATH`, and rejects network, Ollama, or service commands.
+`GITHUB_PATH`, rejects network, Ollama, or service commands, and proves corrupt
+archive rejection. Internal per-target cargo-dist manifests carry archive
+checksums into generated installer; manifests are never release assets. PR
+validation also builds and executes real generated Linux installer.
 
 ## Trust
 
