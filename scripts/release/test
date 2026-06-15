@@ -73,3 +73,193 @@ if grep -E 'uses:' .github/workflows/release.yml \
   echo "mutable action reference found" >&2
   exit 1
 fi
+
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64)
+    fixture_target="aarch64-apple-darwin"
+    ;;
+  Darwin-x86_64)
+    fixture_target="x86_64-apple-darwin"
+    ;;
+  Linux-x86_64)
+    fixture_target="x86_64-unknown-linux-gnu"
+    ;;
+  *)
+    echo "unsupported release fixture host: $(uname -s)-$(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+fixture_package="cowork-${fixture_target}"
+fixture_root="${tmp_dir}/package/${fixture_package}"
+fixture_archive="${tmp_dir}/${fixture_package}.tar.xz"
+mkdir -p "$fixture_root"
+
+cat >"${tmp_dir}/cowork.c" <<'EOF'
+#include <stdio.h>
+#include <string.h>
+
+int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+    puts("cowork 1.2.3");
+    return 0;
+  }
+  if (argc == 2 && strcmp(argv[1], "--help") == 0) {
+    puts("fixture help");
+    return 0;
+  }
+  if (argc == 4 && strcmp(argv[1], "init") == 0 &&
+      strcmp(argv[2], "codex") == 0 && strcmp(argv[3], "--print") == 0) {
+    puts("# cowork rules for Codex\n\n- cowork locate\n- cowork ask\n- cowork brief");
+    return 0;
+  }
+  return 2;
+}
+EOF
+
+cc "${tmp_dir}/cowork.c" -o "${fixture_root}/cowork"
+cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "$fixture_root"
+
+write_checksum() {
+  local file="$1"
+  local checksum
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    checksum="$(sha256sum "$file" | awk '{print $1}')"
+  else
+    checksum="$(shasum -a 256 "$file" | awk '{print $1}')"
+  fi
+  printf '%s  %s\n' "$checksum" "$(basename "$file")" >"${file}.sha256"
+}
+
+tar -cJf "$fixture_archive" -C "${tmp_dir}/package" "$fixture_package"
+write_checksum "$fixture_archive"
+scripts/release/verify-archive \
+  "$fixture_target" "$fixture_archive" "${tmp_dir}/Cargo.toml"
+cp "$fixture_archive" "${tmp_dir}/valid-archive.tar.xz"
+cp "${fixture_archive}.sha256" "${tmp_dir}/valid-archive.tar.xz.sha256"
+
+printf 'corrupt\n' >>"$fixture_archive"
+if scripts/release/verify-archive \
+  "$fixture_target" "$fixture_archive" "${tmp_dir}/Cargo.toml" \
+  >/dev/null 2>&1; then
+  echo "corrupt archive fixture passed" >&2
+  exit 1
+fi
+
+cp "${tmp_dir}/valid-archive.tar.xz" "$fixture_archive"
+cp "${tmp_dir}/valid-archive.tar.xz.sha256" "${fixture_archive}.sha256"
+touch "${fixture_root}/unexpected"
+tar -cJf "$fixture_archive" -C "${tmp_dir}/package" "$fixture_package"
+write_checksum "$fixture_archive"
+if scripts/release/verify-archive \
+  "$fixture_target" "$fixture_archive" "${tmp_dir}/Cargo.toml" \
+  >/dev/null 2>&1; then
+  echo "unexpected package file fixture passed" >&2
+  exit 1
+fi
+
+rm "${fixture_root}/unexpected"
+cp "${tmp_dir}/valid-archive.tar.xz" "$fixture_archive"
+cp "${tmp_dir}/valid-archive.tar.xz.sha256" "${fixture_archive}.sha256"
+
+rm "${fixture_root}/README.md"
+mkdir "${fixture_root}/README.md"
+tar -cJf "$fixture_archive" -C "${tmp_dir}/package" "$fixture_package"
+write_checksum "$fixture_archive"
+if scripts/release/verify-archive \
+  "$fixture_target" "$fixture_archive" "${tmp_dir}/Cargo.toml" \
+  >/dev/null 2>&1; then
+  echo "directory package file fixture passed" >&2
+  exit 1
+fi
+
+rmdir "${fixture_root}/README.md"
+cp README.md "${fixture_root}/README.md"
+cp "${tmp_dir}/valid-archive.tar.xz" "$fixture_archive"
+cp "${tmp_dir}/valid-archive.tar.xz.sha256" "${fixture_archive}.sha256"
+
+if [[ "$fixture_target" == "x86_64-unknown-linux-gnu" ]]; then
+  cat >"${fixture_root}/cowork" <<'EOF'
+#!/bin/sh
+if [ "$#" -eq 1 ] && [ "$1" = "--version" ]; then
+  printf '%s\n' 'cowork 1.2.3'
+  exit 0
+fi
+exit 2
+EOF
+  chmod 0755 "${fixture_root}/cowork"
+  tar -cJf "$fixture_archive" -C "${tmp_dir}/package" "$fixture_package"
+  write_checksum "$fixture_archive"
+
+  fixture_installer="${tmp_dir}/cowork-installer.sh"
+  cat >"$fixture_installer" <<'EOF'
+#!/bin/sh
+set -eu
+
+APP_VERSION="1.2.3"
+checksum="CHECKSUM_PLACEHOLDER"
+
+metadata() {
+  case "$1" in
+    linux)
+            _bins="cowork"
+            _updater_name=""
+            _checksum_style="sha256"
+            _checksum_value="CHECKSUM_PLACEHOLDER"
+      ;;
+  esac
+  : cowork-x86_64-unknown-linux-gnu.tar.xz
+}
+
+archive="cowork-x86_64-unknown-linux-gnu.tar.xz"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+curl -fsSL "${COWORK_DOWNLOAD_URL}/${archive}" -o "$work/$archive"
+actual="$(sha256sum "$work/$archive" | awk '{print $1}')"
+if [ "$actual" != "$checksum" ]; then
+  echo "checksum mismatch" >&2
+  exit 1
+fi
+tar -xJf "$work/$archive" -C "$work"
+
+mkdir -p "$CARGO_HOME/bin" "$XDG_CONFIG_HOME/cowork"
+mkdir -p "$XDG_CONFIG_HOME/fish/conf.d"
+cp "$work/cowork-x86_64-unknown-linux-gnu/cowork" "$CARGO_HOME/bin/cowork"
+chmod 0755 "$CARGO_HOME/bin/cowork"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\n' "$CARGO_HOME" >"$CARGO_HOME/env"
+printf 'set -x PATH "%s/bin" $PATH\n' "$CARGO_HOME" >"$CARGO_HOME/env.fish"
+printf '\n. "%s/env"\n' "$CARGO_HOME" >"$HOME/.profile"
+printf '\n. "%s/env"\n' "$CARGO_HOME" >"$HOME/.zshrc"
+printf 'source "%s/env.fish"\n' "$CARGO_HOME" \
+  >"$XDG_CONFIG_HOME/fish/conf.d/cowork.env.fish"
+printf '%s\n' "$CARGO_HOME/bin" >>"$GITHUB_PATH"
+printf '{"binaries":["cowork"],"cdylibs":[],"cstaticlibs":[],"install_layout":"cargo-home","install_prefix":"%s","modify_path":true,"provider":{"source":"cargo-dist","version":"0.32.0"},"source":{"app_name":"cowork"},"version":"1.2.3"}\n' \
+  "$CARGO_HOME" >"$XDG_CONFIG_HOME/cowork/cowork-receipt.json"
+EOF
+  fixture_checksum="$(awk '{print $1; exit}' "${fixture_archive}.sha256")"
+  sed -i.bak "s/CHECKSUM_PLACEHOLDER/$fixture_checksum/g" "$fixture_installer"
+  rm "${fixture_installer}.bak"
+  chmod 0755 "$fixture_installer"
+
+  checksum_free_installer="${tmp_dir}/checksum-free-installer.sh"
+  sed '/_checksum_style=/d; /_checksum_value=/d' \
+    "$fixture_installer" >"$checksum_free_installer"
+  chmod 0755 "$checksum_free_installer"
+  if scripts/release/verify-installer \
+    "$checksum_free_installer" "$tmp_dir" "${tmp_dir}/Cargo.toml" linux \
+    >/dev/null 2>&1; then
+    echo "checksum-free installer fixture passed" >&2
+    exit 1
+  fi
+
+  scripts/release/verify-installer \
+    "$fixture_installer" "$tmp_dir" "${tmp_dir}/Cargo.toml" linux
+fi
+
+grep -F 'name: dist-manifest-${{ matrix.target }}' .github/workflows/release.yml \
+  >/dev/null
+grep -F 'pattern: dist-manifest-*' .github/workflows/release.yml >/dev/null
+grep -F 'needs: [packaged-smoke, installer]' .github/workflows/release.yml \
+  >/dev/null
+grep -F 'needs: attest' .github/workflows/release.yml >/dev/null
