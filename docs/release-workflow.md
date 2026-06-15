@@ -1,8 +1,10 @@
 # Release Workflow
 
-Tag `vX.Y.Z` starts release. Tag must match `Cargo.toml`, root `Cargo.lock`, and
-top-level CHANGELOG heading. Ordinary `main` push cannot release. PR runs plan,
-config, fixture, permission, and pin checks only.
+Tag `vX.Y.Z` starts stable release. Tag `vX.Y.Z-rc.N` starts prerelease, where
+`N` is positive decimal without leading zero. Tag must match `Cargo.toml`, root
+`Cargo.lock`, and top-level CHANGELOG heading. Other suffixes fail validation.
+Ordinary `main` push cannot release. PR runs plan, config, fixture, permission,
+and pin checks only.
 
 ## Targets
 
@@ -55,3 +57,5 @@ validation also builds and executes real generated Linux installer.
 - attestation job alone gets OIDC and attestation writes
 - release job alone gets `contents: write`
 - matching CHANGELOG section is sole GitHub release body
+- validated RC tags publish non-draft GitHub prereleases
+- validated stable tags publish non-draft stable GitHub releases

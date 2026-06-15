@@ -25,6 +25,8 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-22.04
+    outputs:
+      prerelease: ${{ steps.release-metadata.outputs.prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
@@ -37,6 +39,7 @@ jobs:
           echo "$RUNNER_TEMP/cargo-dist-bin" >> "$GITHUB_PATH"
 
       - name: Validate release metadata
+        id: release-metadata
         env:
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
         run: scripts/release/validate "$RELEASE_TAG"
@@ -283,7 +286,7 @@ jobs:
 
   release:
     if: github.event_name == 'push'
-    needs: attest
+    needs: [attest, validate]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -315,7 +318,9 @@ jobs:
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
         with:
           body_path: release-notes.md
+          draft: false
           fail_on_unmatched_files: true
+          prerelease: ${{ needs.validate.outputs.prerelease }}
           files: |
             release/cowork-aarch64-apple-darwin.tar.xz
             release/cowork-aarch64-apple-darwin.tar.xz.sha256

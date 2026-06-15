@@ -36,7 +36,36 @@ run_validate() {
 }
 
 write_fixture "1.2.3" "1.2.3" "# v1.2.3, 2026-06-10"
-run_validate "v1.2.3"
+stable_output="${tmp_dir}/stable-output"
+GITHUB_OUTPUT="$stable_output" run_validate "v1.2.3"
+grep -Fx 'prerelease=false' "$stable_output" >/dev/null
+
+write_fixture "1.2.3-rc.1" "1.2.3-rc.1" \
+  "# v1.2.3-rc.1, 2026-06-10"
+rc_output="${tmp_dir}/rc-output"
+GITHUB_OUTPUT="$rc_output" run_validate "v1.2.3-rc.1"
+grep -Fx 'prerelease=true' "$rc_output" >/dev/null
+
+write_fixture "1.2.3-rc.1" "1.2.3-rc.1" \
+  "# v1.2.3-rc.2, 2026-06-10"
+if run_validate "v1.2.3-rc.2" >/dev/null 2>&1; then
+  echo "RC version mismatch fixture passed" >&2
+  exit 1
+fi
+
+for malformed_tag in \
+  v1.2.3-rc \
+  v1.2.3-rc.0 \
+  v1.2.3-rc.01 \
+  v1.2.3-rc.1.1 \
+  v1.2.3-beta.1; do
+  write_fixture "${malformed_tag#v}" "${malformed_tag#v}" \
+    "# ${malformed_tag}, 2026-06-10"
+  if run_validate "$malformed_tag" >/dev/null 2>&1; then
+    echo "malformed RC tag fixture passed: $malformed_tag" >&2
+    exit 1
+  fi
+done
 
 write_fixture "1.2.3" "1.2.4" "# v1.2.3, 2026-06-10"
 if run_validate "v1.2.3" >/dev/null 2>&1; then
@@ -50,11 +79,31 @@ if run_validate "v1.2.3" >/dev/null 2>&1; then
   exit 1
 fi
 
-write_fixture "1.2.3" "1.2.3" "# v1.2.3, 2026-06-10"
-if run_validate "v1.2.3-rc.1" >/dev/null 2>&1; then
-  echo "invalid tag fixture passed" >&2
-  exit 1
-fi
+cat >"${tmp_dir}/notes-changelog.md" <<'EOF'
+# Unreleased
+
+# v1.2.3-rc.1, 2026-06-10
+
+## Added
+
+- RC fixture
+
+# v1.2.2, 2026-06-09
+
+- prior release
+EOF
+
+cat >"${tmp_dir}/expected-notes.md" <<'EOF'
+
+## Added
+
+- RC fixture
+
+EOF
+
+scripts/release/notes v1.2.3-rc.1 "${tmp_dir}/notes-changelog.md" \
+  >"${tmp_dir}/actual-notes.md"
+diff -u "${tmp_dir}/expected-notes.md" "${tmp_dir}/actual-notes.md"
 
 cat >"${tmp_dir}/release-manifest.txt" <<'EOF'
 cowork-aarch64-apple-darwin.tar.xz
@@ -262,4 +311,9 @@ grep -F 'name: dist-manifest-${{ matrix.target }}' .github/workflows/release.yml
 grep -F 'pattern: dist-manifest-*' .github/workflows/release.yml >/dev/null
 grep -F 'needs: [packaged-smoke, installer]' .github/workflows/release.yml \
   >/dev/null
-grep -F 'needs: attest' .github/workflows/release.yml >/dev/null
+grep -F 'prerelease: ${{ steps.release-metadata.outputs.prerelease }}' \
+  .github/workflows/release.yml >/dev/null
+grep -F 'needs: [attest, validate]' .github/workflows/release.yml >/dev/null
+grep -F 'prerelease: ${{ needs.validate.outputs.prerelease }}' \
+  .github/workflows/release.yml >/dev/null
+grep -F 'draft: false' .github/workflows/release.yml >/dev/null
