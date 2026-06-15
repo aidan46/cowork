@@ -1,5 +1,7 @@
 # Unreleased
 
+# v0.6.0-rc.1, 2026-06-15
+
 ## Added
 
 - top-level `cowork --version` now prints package metadata version text
