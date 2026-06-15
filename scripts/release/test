@@ -79,6 +79,22 @@ if run_validate "v1.2.3" >/dev/null 2>&1; then
   exit 1
 fi
 
+for tag in v1.2.3 v1.2.3-rc.1; do
+  write_fixture "${tag#v}" "${tag#v}" \
+    "# ${tag//./x}, 2026-06-10"
+  if run_validate "$tag" >/dev/null 2>&1; then
+    echo "non-literal CHANGELOG heading fixture passed: $tag" >&2
+    exit 1
+  fi
+done
+
+write_fixture "1.2.3-rc.1" "1.2.3-rc.1" \
+  "# v1.2.3-rc.1, 2026-6-10"
+if run_validate "v1.2.3-rc.1" >/dev/null 2>&1; then
+  echo "malformed CHANGELOG date fixture passed" >&2
+  exit 1
+fi
+
 cat >"${tmp_dir}/notes-changelog.md" <<'EOF'
 # Unreleased
 
@@ -104,6 +120,8 @@ EOF
 scripts/release/notes v1.2.3-rc.1 "${tmp_dir}/notes-changelog.md" \
   >"${tmp_dir}/actual-notes.md"
 diff -u "${tmp_dir}/expected-notes.md" "${tmp_dir}/actual-notes.md"
+
+write_fixture "1.2.3" "1.2.3" "# v1.2.3, 2026-06-10"
 
 cat >"${tmp_dir}/release-manifest.txt" <<'EOF'
 cowork-aarch64-apple-darwin.tar.xz
