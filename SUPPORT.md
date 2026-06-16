@@ -1,21 +1,10 @@
 # Support
 
-Use GitHub issues for usage questions, bug reports, and docs gaps:
+Pick route that matches report:
 
-<https://github.com/aidan46/cowork/issues/new>
-
-Before opening issue:
-
-- read [README.md](README.md)
-- run `cargo run -- ask --help`
-- read [CONTRIBUTING.md](CONTRIBUTING.md) if you plan to send patch
-
-Include:
-
-- exact command
-- expected result
-- actual stdout JSON and exit code
-- model name and host
-- smallest repro path set that still fails
+- Usage questions and docs gaps: open blank issue at <https://github.com/aidan46/cowork/issues/new>. Read [README.md](README.md), run `cargo run -- ask --help`, and include exact command plus what confused you.
+- Bug reports: use bug form at <https://github.com/aidan46/cowork/issues/new?template=bug_report.yml>. Include exact command, expected result, actual stdout JSON and exit code, model name, host, and smallest repro path set.
+- Feature requests: use feature form at <https://github.com/aidan46/cowork/issues/new?template=feature_request.yml>. Include problem, desired behavior, workflow, and constraints.
+- Security vulnerabilities: use private advisory at <https://github.com/aidan46/cowork/security/advisories/new>. Do not post security details in public issues or pull requests.
 
 PRs welcome. Follow [CONTRIBUTING.md](CONTRIBUTING.md) for branch, checks, and PR flow.
