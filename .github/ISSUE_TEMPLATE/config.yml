@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Support guide
+    url: https://github.com/aidan46/cowork/blob/main/SUPPORT.md
+    about: Pick usage, bug, feature, or security route before opening issue.
+  - name: Private security report
+    url: https://github.com/aidan46/cowork/security/advisories/new
+    about: Report vulnerabilities privately. Do not open public security issues.

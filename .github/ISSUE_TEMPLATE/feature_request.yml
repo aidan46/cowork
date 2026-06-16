@@ -1,0 +1,50 @@
+name: Feature request
+description: Propose focused product or workflow improvement.
+title: "feat: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for public feature requests only.
+
+        If request is about security weakness or exploit path, do not post it here. Use private vulnerability reporting instead:
+        <https://github.com/aidan46/cowork/security/advisories/new>
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What job is blocked or awkward today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe desired behavior or output.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Exact workflow
+      description: Show command, inputs, and expected result.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Call out JSON stability, path rules, packaging, or compatibility limits.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds exist today?
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Add examples, links, or prior art.

@@ -1,0 +1,67 @@
+name: Bug report
+description: Report broken or regressed behavior.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for public bugs only.
+
+        If this report could expose secrets, data, code execution, or another security issue, use private vulnerability reporting instead:
+        <https://github.com/aidan46/cowork/security/advisories/new>
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.6.0-rc.1 or git sha
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      description: Include full command and path set.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Include expected JSON shape and exit code when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include exact stdout JSON, stderr, and exit code.
+    validations:
+      required: true
+  - type: textarea
+    id: model
+    attributes:
+      label: Model, provider, and host
+      description: Name exact model and endpoint or local host used.
+      placeholder: llama3.1:8b on http://localhost:11434
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Smallest repro
+      description: Steps or smallest path set that still fails.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Add platform, logs, screenshots, or related links.
