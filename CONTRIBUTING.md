@@ -81,6 +81,48 @@ bash .githooks/pre-commit
 bash .githooks/pre-push
 ```
 
+## Release workflow changes
+
+If your PR touches `.github/workflows/release.yml`, `docs/release-workflow.md`,
+`scripts/release/**`, `release-manifest.txt`, `dist-workspace.toml`,
+`Cargo.toml`, `Cargo.lock`, or `CHANGELOG.md`, run current release-workflow
+development checks:
+
+```bash
+release_tools_dir="$(mktemp -d)"
+scripts/release/install-cargo-dist "$release_tools_dir"
+PATH="$release_tools_dir:$PATH"
+
+scripts/release/validate ""
+scripts/release/test
+
+version="$(awk -F '"' '/^version = "/ { print $2; exit }' Cargo.toml)"
+export REAL_CARGO="$(command -v cargo)"
+export CARGO="$PWD/scripts/release/cargo-locked"
+
+dist build \
+  --tag="v$version" \
+  --artifacts=all \
+  --target=x86_64-unknown-linux-gnu \
+  --output-format=json > generated-installer-manifest.json
+
+scripts/release/verify-installer \
+  target/distrib/cowork-installer.sh \
+  target/distrib \
+  Cargo.toml \
+  linux
+
+dist plan --output-format=json --no-local-paths > release-plan.json
+while IFS= read -r asset; do
+  grep -F "\"$asset\"" release-plan.json >/dev/null
+done < release-manifest.txt
+
+if grep -Eq 'cowork-(aarch64-unknown-linux|x86_64-unknown-linux-musl|pc-windows)' release-plan.json; then
+  echo "cargo-dist plan contains forbidden target" >&2
+  exit 1
+fi
+```
+
 ## Merge command
 
 Preferred merge command:
